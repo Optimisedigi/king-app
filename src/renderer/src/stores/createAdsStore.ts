@@ -7,7 +7,6 @@ import {
   buildCreateAdsPrompt,
 } from '@/lib/constants/create-ads';
 import { pickVariant, type AdReference } from '@/lib/adReferences';
-import { useModelStore } from '@/stores/modelStore';
 import { useImagesStore } from '@/stores/imagesStore';
 import type { EntityData, GeneratedImageData } from '@/types/electron';
 
@@ -20,18 +19,12 @@ export interface ResultSlot {
   error?: string;
 }
 
-// Max product reference images to include with the generation. Google's
-// Gemini 3 Pro Image supports up to 6 object reference images with high
-// fidelity; 4 angles (e.g. front, side, back, detail) gives the model
-// enough to lock in shape, label text, and packaging without bloating
-// the IPC payload.
-// https://ai.google.dev/gemini-api/docs/image-generation
+// Four product angles plus the ad-style reference stay under the app's
+// eight-reference request cap without bloating the IPC payload.
 const MAX_PRODUCT_REFERENCES = 4;
 
 /**
- * Convert a bundled vite-served asset URL to a base64 data URL so it can be
- * passed through IPC to the main process (which only accepts data:, http:,
- * or local-file:// URLs).
+ * passed through IPC to the main process as a data URL.
  */
 async function bundledAssetToDataUrl(assetUrl: string): Promise<string> {
   const response = await fetch(assetUrl);
@@ -53,17 +46,14 @@ interface CreateAdsStore {
   productBrief: string;
   aspectRatio: string;
 
-  // Generation state. Lives in the store (not the component) so fal calls
-  // started before navigation continue updating the slots after the user
-  // returns to the page.
+  // Generation state. Lives in the store so OpenAI requests started before
+  // navigation continue updating the slots after the user returns.
   results: ResultSlot[];
   isGenerating: boolean;
 
-  // Monotonic counter bumped on every runGeneration start and every
-  // cancelGeneration. In-flight fal calls capture this at launch and, on
-  // completion, compare against the current value — if it's moved on,
-  // they silently discard their result. This is how cancel works: we
-  // can't abort fal's server-side queue, but we can ignore its output.
+  // Monotonic counter bumped on every run. In-flight requests capture it and
+  // discard their wizard result if a newer run has started; the remote request
+  // itself may already be billable and cannot be cancelled here.
   generationId: number;
 
   // Cached inputs from the current run — used to retry an individual
@@ -238,7 +228,7 @@ async function generateSingleSlot(
   // `ownedGenId` is the generationId captured when this call started. If
   // the store's counter has moved on by the time we complete, the user
   // has started a fresh wizard session — so we silently skip writing to
-  // the current wizard's results. We still let the fal request complete
+  // the current wizard's results. We still let the OpenAI request complete
   // and save its output to the gallery (images.json) so in-flight work is
   // never lost when the user moves on; it just won't reappear in the
   // (now empty) wizard.
@@ -256,12 +246,11 @@ async function generateSingleSlot(
       resolution: CREATE_ADS_RESOLUTION,
       outputFormat: CREATE_ADS_OUTPUT_FORMAT,
       imageUrls: inputs.imageUrls,
-      modelVariant: useModelStore.getState().selectedModel,
     });
 
     const firstUrl = result.success ? result.resultUrls?.[0] : undefined;
     if (!firstUrl) {
-      updateSlot({ status: 'error', error: "Couldn't generate this one." });
+      updateSlot({ status: 'error', error: result.error ?? "Couldn't generate this one." });
       return;
     }
 

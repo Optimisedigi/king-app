@@ -4,7 +4,6 @@ import { pathToFileURL } from 'url';
 import log from 'electron-log/main';
 import { registerIpcHandlers } from './ipc';
 import { resolveLocalFileUrl } from './services/paths';
-import { loadApiKeysIntoEnv } from './services/apiKeyStore';
 import { initUpdater, checkForUpdates } from './services/updater';
 import { startAgentApiServer, stopAgentApiServer } from './services/agentApiServer';
 
@@ -157,14 +156,13 @@ function setContentSecurityPolicy(): void {
             // styles cannot exfiltrate data, but inline scripts can; that's
             // where the real XSS surface lives and we keep it locked down.
             `style-src 'self' 'unsafe-inline'`,
-            // fal.media / fal.ai: image generation CDNs.
             // shopify CDNs / cdn.shopify.com: product images for Store page.
             // shopee + tiktokcdn: product images for marketplace pages.
             // amazon image CDNs: product images for SP-API listings.
             // All third-party API requests run from the main process, so
             // connect-src only needs to cover renderer-side fetches (none
             // currently — left at 'self').
-            `img-src 'self' data: blob: local-file: https://*.fal.media https://*.fal.ai https://cdn.shopify.com https://*.shopifycdn.com https://*.shopify.com https://*.tiktokcdn.com https://*.tiktokcdn-us.com https://*.shopeemobile.com https://*.shopee.com https://*.amazon.com https://*.media-amazon.com https://*.ssl-images-amazon.com https://*.telegram.org`,
+            `img-src 'self' data: blob: local-file: https://cdn.shopify.com https://*.shopifycdn.com https://*.shopify.com https://*.tiktokcdn.com https://*.tiktokcdn-us.com https://*.shopeemobile.com https://*.shopee.com https://*.amazon.com https://*.media-amazon.com https://*.ssl-images-amazon.com https://*.telegram.org`,
             `font-src 'self' data:`,
             `connect-src ${connectSrc}`,
             `worker-src ${workerSrc}`,
@@ -176,7 +174,6 @@ function setContentSecurityPolicy(): void {
 }
 
 app.whenReady().then(() => {
-  loadApiKeysIntoEnv();
   setContentSecurityPolicy();
   registerLocalFileProtocol();
   registerIpcHandlers();

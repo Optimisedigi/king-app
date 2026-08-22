@@ -4,9 +4,8 @@ import { DeleteIcon } from '@/components/icons';
 /**
  * Polymorphic API-key card. Each integration declares a config of one of three
  * shapes (`SimpleToken`, `OAuth`, `MultiField`); this component renders the
- * matching variant. Old behaviour for FB+fal is preserved via SimpleToken /
- * MultiField — variants kept narrow on purpose so adding a 7th platform is a
- * single config object, not another inline branch in `ApisPage`.
+ * matching variant. OpenAI uses SimpleToken while Meta uses MultiField —
+ * variants stay narrow so adding a platform remains one config object.
  */
 
 interface BaseProps {

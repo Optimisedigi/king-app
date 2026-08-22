@@ -15,7 +15,6 @@ const api = {
       resolution: string;
       outputFormat: string;
       imageUrls: string[];
-      modelVariant?: 'nano_banana_pro' | 'gpt_image_2';
     }) => ipcRenderer.invoke('generate:image', data),
   },
   files: {

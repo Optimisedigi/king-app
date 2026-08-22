@@ -1,13 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { UpdaterStatus } from '@/types/electron';
 import { CloseIcon, DownloadIcon, RefreshIcon } from '@/components/icons';
-import SelectDropdown from '@/components/ui/SelectDropdown';
-import { useModelStore, type ImageModel } from '@/stores/modelStore';
-
-const MODEL_OPTIONS: { value: ImageModel; label: string }[] = [
-  { value: 'nano_banana_pro', label: 'Nano Banana Pro' },
-  { value: 'gpt_image_2', label: 'GPT Image 2' },
-];
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -55,9 +48,6 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     stage: 'idle',
     currentVersion: '…',
   });
-  const selectedModel = useModelStore((s) => s.selectedModel);
-  const setSelectedModel = useModelStore((s) => s.setSelectedModel);
-
   // Subscribe to updater status broadcasts for as long as the modal is mounted
   // on the DOM (we keep it mounted for the open/close transition).
   useEffect(() => {
@@ -142,25 +132,6 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <CloseIcon />
           </button>
         </div>
-
-        {/* Image model — routes every generation (Image, Clone, Create Ads)
-            through the chosen fal endpoint. */}
-        <section className="mt-6 rounded-2xl border border-[var(--base-color-brand--umber)]/30 bg-[var(--base-color-brand--champagne)]/60 px-4 py-3">
-          <p
-            className="text-sm font-semibold text-[var(--base-color-brand--bean)]"
-            style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
-          >
-            Image model
-          </p>
-          <div className="mt-2">
-            <SelectDropdown
-              options={MODEL_OPTIONS}
-              value={selectedModel}
-              onChange={(v) => setSelectedModel(v as ImageModel)}
-              fullWidth
-            />
-          </div>
-        </section>
 
         {/* Updates section */}
         <section className="mt-4 rounded-2xl border border-[var(--base-color-brand--umber)]/30 bg-[var(--base-color-brand--champagne)]/60 p-4">

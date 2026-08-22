@@ -20,8 +20,6 @@ interface ApiKeyStore {
   keys: Record<string, StoredKey>;
 }
 
-const ENV_MAP: Record<string, string> = { fal: 'FAL_KEY' };
-
 function getStorePath(): string {
   return join(getDataDir(), 'api-keys.json');
 }
@@ -126,11 +124,6 @@ export async function setApiKey(service: string, key: string): Promise<void> {
     store.keys[service] = { encryptedKey: encrypt(key), savedAt: new Date().toISOString() };
     writeStoreRaw(store);
   });
-
-  // Mirror into process.env so SDK clients (e.g. fal-ai) pick it up without
-  // re-reading the encrypted file on every call.
-  const envVar = ENV_MAP[service];
-  if (envVar) process.env[envVar] = key;
 }
 
 export async function deleteApiKey(service: string): Promise<void> {
@@ -140,20 +133,6 @@ export async function deleteApiKey(service: string): Promise<void> {
     delete store.keys[service];
     writeStoreRaw(store);
   });
-
-  const envVar = ENV_MAP[service];
-  if (envVar) delete process.env[envVar];
-}
-
-/** Load saved keys into process.env on startup. */
-export function loadApiKeysIntoEnv(): void {
-  const store = readStore();
-  for (const [service, envVar] of Object.entries(ENV_MAP)) {
-    if (!process.env[envVar] && store.keys[service]?.encryptedKey) {
-      const plain = decrypt(store.keys[service].encryptedKey!);
-      if (plain) process.env[envVar] = plain;
-    }
-  }
 }
 
 function maskKey(key: string): string {

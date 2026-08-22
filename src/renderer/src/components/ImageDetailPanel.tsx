@@ -242,7 +242,7 @@ export default function ImageDetailPanel({
                 <div className="grid grid-cols-[1fr_auto] px-4 py-3.5">
                   <p className="text-sm text-[var(--base-color-brand--umber)]">Model</p>
                   <p className="text-sm font-semibold text-[var(--base-color-brand--bean)]">
-                    Nano Banana Pro
+                    GPT Image 2
                   </p>
                 </div>
               </div>

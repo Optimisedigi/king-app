@@ -66,14 +66,14 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
             className="text-2xl leading-none font-black tracking-tight text-[var(--base-color-brand--bean)]"
             style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
           >
-            King
+            OptiMate Image Editor
           </h1>
           {/* Version badge next to the wordmark. Version is baked in at build
               time so it renders immediately, with no IPC dependency. */}
           <span
             className="inline-flex items-center rounded-full border border-[var(--base-color-brand--umber)]/40 bg-[var(--base-color-brand--champagne)] px-2 py-0.5 text-[10px] font-bold tracking-wider text-[var(--base-color-brand--bean)]"
             style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
-            title={`King v${APP_VERSION}`}
+            title={`OptiMate Image Editor v${APP_VERSION}`}
           >
             v{APP_VERSION}
           </span>

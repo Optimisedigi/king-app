@@ -7,7 +7,6 @@ import {
   buildClonePrompt,
 } from '@/lib/constants/clone';
 import { detectSoftRefusal } from '@/lib/imageHash';
-import { useModelStore } from '@/stores/modelStore';
 import { useImagesStore } from '@/stores/imagesStore';
 import type { EntityData, GeneratedImageData } from '@/types/electron';
 
@@ -20,11 +19,8 @@ export interface CloneResultSlot {
   error?: string;
 }
 
-// Max character reference images to include. Google's Gemini 3 Pro Image
-// officially supports up to 5 character images for identity consistency;
-// more angles = better triangulation of the character's face and body.
-// https://ai.google.dev/gemini-api/docs/image-generation
-const MAX_CHARACTER_REFERENCES = 5;
+// Leave room for the source image under the shared eight-reference request cap.
+const MAX_CHARACTER_REFERENCES = 7;
 
 /**
  * A source image the user uploads as the scene to clone. Kept as an
@@ -177,7 +173,7 @@ async function generateSingleSlot(
 
   // If the store's generationId has moved on since this call started
   // (the user began a fresh wizard session), we skip writing to the
-  // wizard's results — but the fal request itself still completes and
+  // wizard's results — but the OpenAI request still completes and
   // its output is still saved to the gallery, so background work is
   // never lost when the user moves on.
   const updateSlot = (update: Partial<CloneResultSlot>) => {
@@ -188,28 +184,23 @@ async function generateSingleSlot(
   };
 
   try {
-    const modelVariant = useModelStore.getState().selectedModel;
     const result = await window.api.generate.image({
       prompt: inputs.prompt,
       aspectRatio: inputs.aspectRatio,
       resolution: CLONE_RESOLUTION,
       outputFormat: CLONE_OUTPUT_FORMAT,
       imageUrls: inputs.imageUrls,
-      modelVariant,
     });
 
     const outputUrl = result.success ? (result.resultUrls?.[0] ?? null) : null;
 
     if (outputUrl === null) {
-      updateSlot({ status: 'error', error: "Couldn't generate this one." });
+      updateSlot({ status: 'error', error: result.error ?? "Couldn't generate this one." });
       return;
     }
 
-    // Soft-refusal check — Gemini sometimes echoes back one of the input
-    // images instead of generating a new one. Surface that clearly so the
-    // user knows retrying on the same inputs won't help. (GPT Image 2
-    // doesn't exhibit this failure mode the same way, but the check is
-    // cheap and harmless either way.)
+    // Soft-refusal check — surface an unchanged reference image clearly
+    // so the user knows retrying the same inputs may not help.
     const refusalCheck = await detectSoftRefusal(outputUrl, inputs.imageUrls);
     if (refusalCheck.isSoftRefusal) {
       updateSlot({

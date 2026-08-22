@@ -180,7 +180,7 @@ async function spApi(
         headers: {
           'x-amz-access-token': token,
           Accept: 'application/json',
-          'User-Agent': 'King/1.0 (Language=Node.js)',
+          'User-Agent': 'OptiMateImageEditor/1.0 (Language=Node.js)',
         },
       });
     },

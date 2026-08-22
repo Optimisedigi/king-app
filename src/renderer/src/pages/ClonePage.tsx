@@ -381,7 +381,7 @@ function SourceStep({
   const handleFile = useCallback(
     async (file: File) => {
       if (!SUPPORTED_IMAGE_MIME_REGEX.test(file.type)) {
-        toast.error('Use a JPEG, PNG, WebP, or HEIC image.');
+        toast.error('Use a JPEG, PNG, or WebP image.');
         return;
       }
       if (file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024) {
@@ -476,7 +476,7 @@ function SourceStep({
           Drop a reference image here
         </p>
         <p className="text-xs text-[var(--base-color-brand--umber)]">
-          or click to browse · JPEG, PNG, WebP, HEIC · up to {MAX_IMAGE_SIZE_MB}MB
+          or click to browse · JPEG, PNG, WebP · up to {MAX_IMAGE_SIZE_MB}MB
         </p>
       </label>
     </div>

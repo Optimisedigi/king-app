@@ -1,10 +1,9 @@
-// Soft-refusal detection for Gemini / Nano Banana Pro.
+// Soft-refusal detection for image edits.
 //
-// When Gemini's safety filter partially fires on a multi-image edit, the
-// model often returns one of the input images as the "output" rather
-// than throwing an error. This utility perceptually hashes the output
-// and every input image, and reports whether any pair is similar enough
-// to count as a soft refusal (i.e. Gemini echoed an input back at us).
+// A model can occasionally return one of the input images unchanged instead
+// of throwing an error. This utility perceptually hashes the output and each
+// input, then reports whether a pair is similar enough to count as an echoed
+// reference image.
 //
 // Implementation is pure-JS average-hash (aHash) via a 2D canvas:
 // downscale to 16×16 grayscale, compute the mean intensity, then emit a
@@ -21,11 +20,9 @@ const HASH_SIZE = 16;
 const HASH_BITS = HASH_SIZE * HASH_SIZE; // 256
 
 /**
- * Hamming distance threshold under which two hashes count as "same image
- * or near-copy". Tuned empirically against Gemini's soft-refusal outputs
- * — which are often lightly re-encoded / colour-shifted versions of the
- * input, not byte-identical. 8/256 bits = ~3% mismatch, tight enough to
- * avoid false positives while catching Gemini's typical re-encodes.
+ * Hamming distance threshold under which two hashes count as the same image
+ * or a near-copy. An 8/256-bit mismatch is tight enough to avoid most false
+ * positives while still catching lightly re-encoded reference images.
  */
 export const SOFT_REFUSAL_HAMMING_THRESHOLD = 8;
 
@@ -141,10 +138,7 @@ export async function detectSoftRefusal(
 
     const isSoftRefusal = bestDistance <= SOFT_REFUSAL_HAMMING_THRESHOLD;
 
-    // Log every check so we can eyeball in DevTools how close each
-    // generated image comes to its inputs — useful for tuning the
-    // threshold empirically against real Gemini soft-refusal behaviour
-    // without having to redeploy.
+    // Log the distance so threshold tuning has concrete evidence.
     console.log(
       `[softRefusal] distance=${bestDistance}/${HASH_BITS} ` +
         `threshold=${SOFT_REFUSAL_HAMMING_THRESHOLD} ` +

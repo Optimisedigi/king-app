@@ -467,7 +467,8 @@ export default function ShopeeAdsPage({ onNavigate }: ShopeeAdsPageProps) {
           {campaigns.length === 0 ? (
             <div className="rounded-xl border border-dashed border-[var(--base-color-brand--umber)]/30 bg-[var(--base-color-brand--champagne)]/50 p-8 text-center text-sm text-[var(--base-color-brand--umber)]">
               Shopee Ads campaign metrics aren’t available yet — the Shopee Open Platform connection
-              covers products and orders, but the Ads API surface isn’t wired into King yet.
+              covers products and orders, but the Ads API surface isn’t wired into OptiMate Image
+              Editor yet.
             </div>
           ) : (
             <div className="flex flex-col gap-3">

@@ -175,8 +175,7 @@ export interface ElectronAPI {
       resolution: string;
       outputFormat: string;
       imageUrls: string[];
-      modelVariant?: 'nano_banana_pro' | 'gpt_image_2';
-    }) => Promise<{ success: boolean; resultUrls: string[] }>;
+    }) => Promise<{ success: boolean; resultUrls?: string[]; error?: string }>;
   };
   files: {
     download: (

@@ -1598,17 +1598,14 @@ for (const [cat, ids] of Object.entries(categoryMap) as [PromptCategory, string[
 /**
  * Canonical product-fidelity clause appended to every prompt.
  *
- * Every prompt in this app is sent to a multimodal image model (Nano Banana Pro
- * / GPT-image-2) together with one or more reference images of the user's
- * actual product. The single biggest failure mode in product photo generation
- * is the model rebranding the product — paraphrasing the label copy, swapping
+ * Every prompt in this app is sent to GPT Image 2 together with one or more
+ * reference images of the user's actual product. The single biggest failure
+ * mode in product photo generation is the model rebranding the product —
+ * paraphrasing the label copy, swapping
  * the logo, shifting brand colors, or inventing new on-pack text.
  *
- * Google's own Nano Banana docs explicitly recommend describing critical
- * details (faces, logos) you want preserved, and high-signal community guides
- * use the exact same pattern: name what to preserve, name what NOT to change.
- * (Sources: ai.google.dev image-generation docs; Google Cloud / DeepMind
- * prompting guides; awesome-nanobanana-pro; Atlabs and Imagine.art guides.)
+ * OpenAI recommends describing critical details you want preserved. This
+ * clause follows that pattern: name what to preserve and what must not change.
  *
  * This clause is the single source of truth — individual prompts above must
  * NOT add their own "color-accurate label" / "readable label" wording, because

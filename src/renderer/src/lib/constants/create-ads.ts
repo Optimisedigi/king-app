@@ -1,33 +1,21 @@
 // Hardcoded configuration for the Create Ads page.
 //
-// The prompt follows Google's official [REFERENCES] / [RELATIONSHIP] /
-// [NEW SCENARIO] framework for Gemini 2.5 / Gemini 3 image models, plus
-// the "Identity Lock" phrasing popularised by the Nano Banana Pro prompting
-// guide (DeepMind / Google AI Studio, Nov 2025). Gemini 3-family models
-// respond best to concise, direct instructions with negative constraints
-// placed in a single terminal clause — so the template is kept tight
-// (~140 words + brief) and avoids scattered "do not" directives.
-//
-// References:
-//   - https://cloud.google.com/blog/products/ai-machine-learning/ultimate-prompting-guide-for-nano-banana
-//   - https://developers.googleblog.com/en/how-to-prompt-gemini-2-5-flash-image-generation-for-the-best-results/
-//   - https://ai.google.dev/gemini-api/docs/gemini-3 (reasoning-model prompting)
-//   - https://github.com/ZizheRuan/awesome-nanobanana2 — canonical community prompts
+// The prompt gives GPT Image 2 explicit reference roles and concise identity,
+// composition, and negative constraints. This improves product fidelity while
+// keeping user-provided copy and the requested aspect ratio unambiguous.
 
 export const CREATE_ADS_GENERATION_COUNT = 4;
-export const CREATE_ADS_RESOLUTION = '2K';
+export const CREATE_ADS_RESOLUTION = 'medium';
 export const CREATE_ADS_OUTPUT_FORMAT = 'png';
 
 /**
- * Build the prompt sent to Nano Banana for ad generation.
+ * Build the prompt sent to GPT Image 2 for ad generation.
  *
  * @param productBrief  Free-text brief from the user. Any copy the user wants
  *   rendered verbatim into the image should already be wrapped in double
  *   quotes — the model honours literal text only when quoted.
- * @param aspectRatio   Target output aspect ratio (e.g. '1:1', '4:5'). Even
- *   though fal.ai accepts this as an API parameter, Google's guide
- *   recommends re-stating it in the prompt text for belt-and-suspenders
- *   reliability.
+ * @param aspectRatio   Target output aspect ratio (e.g. '1:1', '4:5'). It is
+ *   restated in the prompt so the intended composition remains explicit.
  */
 export function buildCreateAdsPrompt(productBrief: string, aspectRatio: string): string {
   const brief = productBrief.trim() || '(no additional context provided)';

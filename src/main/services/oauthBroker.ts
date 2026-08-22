@@ -68,14 +68,14 @@ function pkcePair(): { verifier: string; challenge: string } {
 function renderResultPage(ok: boolean, message: string): string {
   const color = ok ? '#2e7d32' : '#c62828';
   return `<!doctype html>
-<html><head><meta charset="utf-8"><title>King — OAuth</title>
+<html><head><meta charset="utf-8"><title>OptiMate Image Editor — OAuth</title>
 <style>
 body{font-family:system-ui,-apple-system,sans-serif;background:#fff8e0;color:#231f20;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
 .card{background:#fff;border-radius:16px;padding:32px 40px;box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:420px;text-align:center}
 h1{margin:0 0 12px;color:${color};font-size:22px}
 p{margin:0;color:#5b4a3f;line-height:1.5}
 </style></head>
-<body><div class="card"><h1>${ok ? 'Connected' : 'Connection failed'}</h1><p>${message}</p><p style="margin-top:16px;font-size:13px;color:#9c7d6a">You can close this tab and return to King.</p></div></body></html>`;
+<body><div class="card"><h1>${ok ? 'Connected' : 'Connection failed'}</h1><p>${message}</p><p style="margin-top:16px;font-size:13px;color:#9c7d6a">You can close this tab and return to OptiMate Image Editor.</p></div></body></html>`;
 }
 
 /**
@@ -157,7 +157,7 @@ export async function beginOAuth(opts: BeginOptions): Promise<BeginOAuthResult> 
       if (k !== 'code' && k !== 'state') extra[k] = v;
     }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(renderResultPage(true, 'Returning you to King.'));
+    res.end(renderResultPage(true, 'Returning you to OptiMate Image Editor.'));
     finish(true, { code, state: returnedState, extra });
   });
 

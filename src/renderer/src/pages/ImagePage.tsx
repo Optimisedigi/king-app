@@ -11,7 +11,6 @@ import {
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import { useImages } from '@/hooks';
 import { useGenerationStore } from '@/stores/generationStore';
-import { useModelStore } from '@/stores/modelStore';
 
 interface ImagePageProps {
   prefillPrompt?: string | null;
@@ -26,7 +25,6 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
   const addImageGeneration = useGenerationStore((s) => s.addImageGeneration);
   const removeImageGeneration = useGenerationStore((s) => s.removeImageGeneration);
   const pendingCount = pendingImageGenerations.length;
-  const selectedModel = useModelStore((s) => s.selectedModel);
 
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null);
@@ -145,11 +143,10 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
             resolution: data.resolution,
             outputFormat: data.outputFormat,
             imageUrls: data.referenceImages,
-            modelVariant: selectedModel,
           });
 
           if (!result.success || !result.resultUrls?.length) {
-            toast.error("Couldn't generate that image. Please try again.");
+            toast.error(result.error ?? "Couldn't generate that image. Please try again.");
             removeImageGeneration(generationId);
             continue;
           }

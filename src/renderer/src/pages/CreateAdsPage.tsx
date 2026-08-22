@@ -21,10 +21,8 @@ import { readImageDimensions } from '@/lib/aspectRatio';
 import { useCreateAdsStore, type ResultSlot, type StepId } from '@/stores/createAdsStore';
 import type { CustomAdReferenceData, EntityData } from '@/types/electron';
 
-// Image MIME types we accept for custom ad-reference uploads. Matches the
-// formats Gemini's image input handles end-to-end (PNG, JPEG, WebP, HEIC,
-// HEIF) so a successful upload always survives the generation pipeline.
-const CUSTOM_AD_ACCEPT = 'image/png,image/jpeg,image/webp,image/heic,image/heif';
+const CUSTOM_AD_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const CUSTOM_AD_ACCEPT = [...CUSTOM_AD_MIME_TYPES].join(',');
 const MAX_CUSTOM_AD_BYTES = 15 * 1024 * 1024;
 
 function customRefToAdReference(ref: CustomAdReferenceData): AdReference {
@@ -81,7 +79,7 @@ export default function CreateAdsPage() {
   const [customRefs, setCustomRefs] = useState<CustomAdReferenceData[]>([]);
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null);
 
-  // Wizard state lives in a Zustand store so it (and any in-flight fal
+  // Wizard state lives in a Zustand store so it (and any in-flight OpenAI
   // generations) survive navigating away from and back to this page.
   const step = useCreateAdsStore((s) => s.step);
   const selectedAdId = useCreateAdsStore((s) => s.selectedAdId);
@@ -157,6 +155,10 @@ export default function CreateAdsPage() {
   );
 
   const handleUploadCustomAd = useCallback(async (file: File) => {
+    if (!CUSTOM_AD_MIME_TYPES.has(file.type)) {
+      toast.error('Use a PNG, JPG, or WebP image.');
+      return;
+    }
     if (file.size > MAX_CUSTOM_AD_BYTES) {
       toast.error('That image is too large. Please pick one under 15 MB.');
       return;
@@ -232,9 +234,8 @@ export default function CreateAdsPage() {
   const goBack = useCallback(() => {
     // On the results step, Back goes back to the format step so the user
     // can adjust and regenerate. In-flight generations are NOT stopped —
-    // fal runs server-side and we've already been charged, so we let the
-    // request complete and save its output to the gallery in the
-    // background.
+    // the OpenAI request may already be billable, so we let it complete
+    // and save its output to the gallery in the background.
     if (step === 'results') {
       setStep('format');
       return;
@@ -543,7 +544,7 @@ function AdStyleStep({
               Add reference
             </span>
             <span className="px-3 text-center text-[11px] text-[var(--base-color-brand--umber)]">
-              PNG, JPG, WebP, HEIC
+              PNG, JPG, WebP
             </span>
           </button>
           <input

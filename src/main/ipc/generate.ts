@@ -1,298 +1,238 @@
-import { readFileSync } from 'fs';
-import { extname } from 'path';
+import { readFileSync, statSync } from 'fs';
+import { basename, extname } from 'path';
+import OpenAI, { APIError, toFile, type Uploadable } from 'openai';
+import log from 'electron-log/main';
+import { getApiKey } from '../services/apiKeyStore';
 import { resolveLocalFileUrl } from '../services/paths';
 import { secureHandle } from './validateSender';
 
-// Google's Gemini 3 Pro Image via fal.ai. Pricing: $0.15/image at 1K/2K,
-// $0.30 at 4K. Edit endpoint accepts up to 14 reference images.
-const NANO_BANANA_PRO_MODEL = 'fal-ai/nano-banana-pro';
-const NANO_BANANA_PRO_EDIT_MODEL = 'fal-ai/nano-banana-pro/edit';
+const IMAGE_MODEL = 'gpt-image-2';
+const MAX_PROMPT_LENGTH = 32_000;
+const MAX_REFERENCE_IMAGES = 8;
+const MAX_REFERENCE_BYTES = 30 * 1024 * 1024;
+const SUPPORTED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const TRUSTED_REMOTE_IMAGE_HOSTS = [
+  'cdn.shopify.com',
+  'shopifycdn.com',
+  'media-amazon.com',
+  'ssl-images-amazon.com',
+  'shopee.com',
+  'shopeemobile.com',
+  'shopeeusercontent.com',
+  'tiktokcdn.com',
+  'tiktokcdn-us.com',
+];
 
-// OpenAI GPT Image 2 via fal.ai. Top-tier text rendering and photoreal.
-// Pricing is token-based — practically $0.01/image at low/1024x768 up to
-// $0.41/image at high/4K. Edit endpoint runs the same underlying model.
-// Both endpoints are namespaced under `openai/...` per fal's official
-// launch announcement (April 21, 2026).
-// https://fal.ai/models/openai/gpt-image-2
-const GPT_IMAGE_2_MODEL = 'openai/gpt-image-2';
-const GPT_IMAGE_2_EDIT_MODEL = 'openai/gpt-image-2/edit';
-
-export type ModelVariant = 'nano_banana_pro' | 'gpt_image_2';
-
-interface GenerateImageData {
+export interface GenerateImageInput {
   prompt: string;
-  aspectRatio: string;
-  resolution: string;
-  outputFormat: string;
-  imageUrls: string[];
-  /** Which fal model to route through. Picked from the Settings modal. */
-  modelVariant?: ModelVariant;
+  count?: number;
+  aspectRatio?: string;
+  resolution?: string;
+  outputFormat?: string;
+  imageUrls?: string[];
 }
 
-// Mirror of the renderer's SUPPORTED_IMAGE_MIME_TYPES — covers every
-// format Google Gemini's image input accepts: PNG, JPEG, WebP, HEIC, HEIF.
-// https://ai.google.dev/gemini-api/docs/image-understanding
-const MIME_TYPES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.heic': 'image/heic',
-  '.heif': 'image/heif',
+export interface GenerateImageResult {
+  success: boolean;
+  resultUrls?: string[];
+  error?: string;
+}
+
+function isTrustedRemoteImageHost(hostname: string): boolean {
+  return TRUSTED_REMOTE_IMAGE_HOSTS.some(
+    (host) => hostname === host || hostname.endsWith(`.${host}`),
+  );
+}
+
+function mimeTypeFromExtension(path: string): string | null {
+  switch (extname(path).toLowerCase()) {
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.webp':
+      return 'image/webp';
+    default:
+      return null;
+  }
+}
+
+function assertReferenceSize(size: number): void {
+  if (size <= 0 || size > MAX_REFERENCE_BYTES) {
+    throw new Error('Each reference image must be between 1 byte and 30 MB.');
+  }
+}
+
+async function readReferenceResponse(response: Response): Promise<Buffer> {
+  if (!response.body) throw new Error('Reference image response was empty.');
+
+  const chunks: Buffer[] = [];
+  let size = 0;
+  const reader = response.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const buffer = Buffer.from(value);
+    size += buffer.byteLength;
+    assertReferenceSize(size);
+    chunks.push(buffer);
+  }
+  assertReferenceSize(size);
+  return Buffer.concat(chunks, size);
+}
+
+async function referenceToFile(source: string, index: number): Promise<Uploadable> {
+  if (source.startsWith('data:')) {
+    const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/i.exec(source);
+    if (!match?.[1] || !match[2] || !SUPPORTED_MIME_TYPES.has(match[1].toLowerCase())) {
+      throw new Error('Reference images must be PNG, JPEG, or WebP.');
+    }
+    const buffer = Buffer.from(match[2], 'base64');
+    assertReferenceSize(buffer.byteLength);
+    const extension = match[1].toLowerCase() === 'image/jpeg' ? 'jpg' : match[1].split('/')[1];
+    return toFile(buffer, `reference-${index}.${extension}`, { type: match[1].toLowerCase() });
+  }
+
+  if (source.startsWith('local-file://')) {
+    const path = resolveLocalFileUrl(source);
+    if (!path) throw new Error('Invalid local reference image path.');
+    const mimeType = mimeTypeFromExtension(path);
+    if (!mimeType) throw new Error('Reference images must be PNG, JPEG, or WebP.');
+    assertReferenceSize(statSync(path).size);
+    return toFile(readFileSync(path), basename(path), { type: mimeType });
+  }
+
+  let url: URL;
+  try {
+    url = new URL(source);
+  } catch {
+    throw new Error('Invalid reference image URL.');
+  }
+  if (url.protocol !== 'https:' || !isTrustedRemoteImageHost(url.hostname)) {
+    throw new Error('Remote reference image host is not supported; upload the image instead.');
+  }
+
+  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) throw new Error(`Could not download reference image (${response.status}).`);
+  const mimeType = response.headers.get('content-type')?.split(';')[0]?.toLowerCase() ?? '';
+  if (!SUPPORTED_MIME_TYPES.has(mimeType)) {
+    throw new Error('Reference images must be PNG, JPEG, or WebP.');
+  }
+  const contentLength = response.headers.get('content-length');
+  if (contentLength !== null) assertReferenceSize(Number(contentLength));
+  const buffer = await readReferenceResponse(response);
+  return toFile(
+    buffer,
+    `reference-${index}.${mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1]}`,
+    {
+      type: mimeType,
+    },
+  );
+}
+
+const IMAGE_SIZES: Record<string, string> = {
+  '1:1': '1024x1024',
+  '2:3': '1024x1536',
+  '3:2': '1536x1024',
+  '3:4': '1152x1536',
+  '4:3': '1536x1152',
+  '4:5': '1216x1520',
+  '5:4': '1520x1216',
+  '9:16': '864x1536',
+  '16:9': '1536x864',
+  '21:9': '1680x720',
 };
 
-function resolveImageUrl(url: string): string {
-  if (url.startsWith('data:') || url.startsWith('http')) return url;
-
-  if (url.startsWith('local-file://')) {
-    const filePath = resolveLocalFileUrl(url);
-    if (!filePath) return url;
-    const buffer = readFileSync(filePath);
-    const ext = extname(filePath).toLowerCase();
-    const mime = MIME_TYPES[ext] || 'image/png';
-    return `data:${mime};base64,${buffer.toString('base64')}`;
+function normaliseInput(data: GenerateImageInput): Required<GenerateImageInput> {
+  const prompt = typeof data.prompt === 'string' ? data.prompt.trim() : '';
+  if (!prompt || prompt.length > MAX_PROMPT_LENGTH) {
+    throw new Error('Prompt must be between 1 and 32,000 characters.');
   }
 
-  return url;
-}
+  const count = Number.isInteger(data.count) ? Number(data.count) : 1;
+  if (count < 1 || count > 4) throw new Error('Image count must be between 1 and 4.');
 
-const MISSING_KEY_MESSAGE =
-  "Your image generator isn't connected yet. Open the APIs page and add your fal.ai key to get started.";
-const INVALID_KEY_MESSAGE =
-  "Your fal.ai key didn't work. Double-check it on the APIs page and save a fresh one if needed.";
-const OUT_OF_CREDITS_MESSAGE =
-  'Your fal.ai account is locked — usually because the balance ran out. If you just topped up, give it a minute to sync and try again. Otherwise top up at fal.ai/dashboard/billing, or check that your API key belongs to the account you topped up.';
-const SAFETY_BLOCK_MESSAGE =
-  'Google blocked this one as a safety precaution. The filter is probabilistic — hitting Try again often works, especially on face-swap and character workflows.';
-const VALIDATION_MESSAGE =
-  "Something about this request wasn't accepted. Try a different image or prompt.";
-
-/**
- * Detect Gemini / Nano Banana Pro safety-filter refusals. Gemini wraps
- * both its prompt-level and post-generation safety blocks inside a 422
- * with a generic "did not generate the expected output" body — we match
- * on that phrase (and its known variants) so we can surface an actionable
- * message instead of the cryptic default.
- */
-function isSafetyBlock(message: string): boolean {
-  return /\b(unsafe content|did not generate the expected output|prohibited[_ ]content|image[_ ]safety)\b/i.test(
-    message,
-  );
-}
-
-/**
- * Walk a fal error body looking for the underlying human-readable message.
- * fal errors vary in shape — sometimes `{detail: "..."}`, sometimes
- * `{detail: [{msg, loc, type}]}`, sometimes a top-level `.message`. This
- * returns whatever text we can find so we can keyword-match it.
- */
-function extractFalMessage(err: { body?: unknown; message?: string }): string {
-  const parts: string[] = [];
-  if (typeof err.message === 'string') parts.push(err.message);
-  const body = err.body as { detail?: unknown; message?: string; error?: string } | undefined;
-  if (body) {
-    if (typeof body.message === 'string') parts.push(body.message);
-    if (typeof body.error === 'string') parts.push(body.error);
-    if (typeof body.detail === 'string') parts.push(body.detail);
-    if (Array.isArray(body.detail)) {
-      for (const d of body.detail) {
-        if (d && typeof d === 'object' && 'msg' in d && typeof d.msg === 'string') {
-          parts.push(d.msg);
-        }
-      }
-    }
+  const imageUrls = Array.isArray(data.imageUrls) ? data.imageUrls : [];
+  if (imageUrls.length > MAX_REFERENCE_IMAGES || imageUrls.some((url) => typeof url !== 'string')) {
+    throw new Error(`You can use up to ${MAX_REFERENCE_IMAGES} reference images.`);
   }
-  return parts.join(' | ');
-}
 
-function isOutOfCredits(status: number | undefined, message: string): boolean {
-  // 402 Payment Required is the canonical HTTP status, but fal has also been
-  // observed returning 401/403 with a credits-related message in the body.
-  if (status === 402) return true;
-  return /\b(insufficient (balance|credits|funds)|out of credits|exhausted|quota|top up|billing|payment required)\b/i.test(
-    message,
-  );
-}
+  const aspectRatio = data.aspectRatio ?? 'auto';
+  if (aspectRatio !== 'auto' && !IMAGE_SIZES[aspectRatio])
+    throw new Error('Unsupported aspect ratio.');
 
-function isAuthFailure(status: number | undefined, message: string): boolean {
-  if (status === 401) return true;
-  if (status === 403) return true;
-  return /\b(unauthorized|invalid api key|invalid key|forbidden)\b/i.test(message);
-}
-
-function selectModel(variant: ModelVariant, hasReferenceImages: boolean): string {
-  if (variant === 'gpt_image_2') {
-    return hasReferenceImages ? GPT_IMAGE_2_EDIT_MODEL : GPT_IMAGE_2_MODEL;
-  }
-  return hasReferenceImages ? NANO_BANANA_PRO_EDIT_MODEL : NANO_BANANA_PRO_MODEL;
-}
-
-/**
- * Map our app-level aspect ratio strings to GPT Image 2's `image_size`
- * presets. GPT only ships these enum values via fal — anything else
- * falls back to `auto` (model infers output dimensions). We do not
- * fabricate custom {width, height} values; the user asked for the docs'
- * options as-is.
- *   https://fal.ai/models/openai/gpt-image-2/api
- */
-function mapAspectToGptImageSize(aspectRatio: string): string {
-  switch (aspectRatio) {
-    case '1:1':
-      return 'square_hd';
-    case '4:3':
-      return 'landscape_4_3';
-    case '3:4':
-      return 'portrait_4_3';
-    case '16:9':
-      return 'landscape_16_9';
-    case '9:16':
-      return 'portrait_16_9';
-    case 'auto':
-      return 'auto';
-    default:
-      return 'auto';
-  }
-}
-
-/**
- * GPT Image 2 has only two quality tiers (`low` / `high`) instead of the
- * 1K/2K/4K resolution ladder Nano Banana exposes. 1K → low (cheap), 2K
- * and 4K → high (default).
- */
-function mapResolutionToGptQuality(resolution: string): 'low' | 'high' {
-  return resolution === 'low' || resolution === '1K' ? 'low' : 'high';
-}
-
-function buildNanoBananaInput(
-  data: GenerateImageData,
-  resolvedUrls: string[],
-): Record<string, unknown> {
-  const input: Record<string, unknown> = {
-    prompt: data.prompt,
-    aspect_ratio: data.aspectRatio || '1:1',
-    resolution: data.resolution || '1K',
-    output_format: data.outputFormat || 'png',
-    num_images: 1,
-    // Most-permissive Layer-1 safety setting (fal scale: 1 strictest,
-    // 6 least strict, default 4). Doesn't bypass Google's Layer-2 policy
-    // filter — most refusals originate there — but eliminates false-
-    // positive Layer-1 blocks that otherwise steal ~5-10% of generations.
-    safety_tolerance: '6',
+  const qualityMap: Record<string, string> = {
+    auto: 'auto',
+    low: 'low',
+    medium: 'medium',
+    high: 'high',
+    '1K': 'low',
+    '2K': 'medium',
+    '4K': 'high',
   };
-  if (resolvedUrls.length > 0) {
-    input.image_urls = resolvedUrls;
-  }
-  return input;
+  const resolution = qualityMap[data.resolution ?? 'high'];
+  if (!resolution) throw new Error('Unsupported image quality.');
+
+  const outputFormat = data.outputFormat ?? 'png';
+  if (!['png', 'jpeg', 'webp'].includes(outputFormat))
+    throw new Error('Unsupported output format.');
+
+  return { prompt, count, aspectRatio, resolution, outputFormat, imageUrls };
 }
 
-function buildGptImage2Input(
-  data: GenerateImageData,
-  resolvedUrls: string[],
-): Record<string, unknown> {
-  const input: Record<string, unknown> = {
-    prompt: data.prompt,
-    image_size: mapAspectToGptImageSize(data.aspectRatio),
-    quality: mapResolutionToGptQuality(data.resolution),
-    output_format: data.outputFormat || 'png',
-    num_images: 1,
-  };
-  if (resolvedUrls.length > 0) {
-    input.image_urls = resolvedUrls;
+function friendlyError(error: unknown): string {
+  if (error instanceof APIError) {
+    if (error.status === 401) return 'OpenAI rejected the API key. Update it on the APIs page.';
+    if (error.status === 429)
+      return 'OpenAI rate limit or credit limit reached. Check your API billing.';
+    if (error.status === 400) return error.message || 'OpenAI rejected this image request.';
+    return `OpenAI image generation failed${error.status ? ` (${error.status})` : ''}.`;
   }
-  return input;
+  return error instanceof Error ? error.message : 'Image generation failed.';
 }
 
 export function registerGenerateHandlers(): void {
-  secureHandle('generate:image', async (_event, data: GenerateImageData) => {
-    // Surface a friendly error up-front rather than letting the SDK throw a
-    // cryptic `Unauthorized` from fal's servers. Every caller (Image page,
-    // Create Ads, future pages) goes through this handler, so fixing it here
-    // covers everything.
-    if (!process.env.FAL_KEY) {
-      throw new Error(MISSING_KEY_MESSAGE);
-    }
+  secureHandle(
+    'generate:image',
+    async (_event, rawData: GenerateImageInput): Promise<GenerateImageResult> => {
+      try {
+        const data = normaliseInput(rawData);
+        const apiKey = getApiKey('openai');
+        if (!apiKey) throw new Error('Add your OpenAI API key on the APIs page first.');
 
-    const { fal } = await import('@fal-ai/client');
+        const openai = new OpenAI({ apiKey });
+        const common = {
+          model: IMAGE_MODEL,
+          prompt: data.prompt,
+          n: data.count,
+          size: data.aspectRatio === 'auto' ? ('auto' as const) : IMAGE_SIZES[data.aspectRatio],
+          quality: data.resolution as 'auto' | 'low' | 'medium' | 'high',
+          output_format: data.outputFormat as 'png' | 'jpeg' | 'webp',
+        };
 
-    const resolvedUrls = (data.imageUrls || [])
-      .map(resolveImageUrl)
-      .filter((u) => u.startsWith('data:') || u.startsWith('http'));
+        const response = data.imageUrls.length
+          ? await openai.images.edit({
+              ...common,
+              image: await Promise.all(data.imageUrls.map(referenceToFile)),
+              input_fidelity: 'high',
+            })
+          : await openai.images.generate(common);
 
-    const hasReferenceImages = resolvedUrls.length > 0;
-    const variant: ModelVariant =
-      data.modelVariant === 'gpt_image_2' ? 'gpt_image_2' : 'nano_banana_pro';
-    const model = selectModel(variant, hasReferenceImages);
+        const resultUrls = (response.data ?? [])
+          .map((image) => image.b64_json)
+          .filter((image): image is string => Boolean(image))
+          .map((image) => `data:image/${data.outputFormat};base64,${image}`);
+        if (!resultUrls.length) throw new Error('OpenAI returned no images.');
 
-    const input =
-      variant === 'gpt_image_2'
-        ? buildGptImage2Input(data, resolvedUrls)
-        : buildNanoBananaInput(data, resolvedUrls);
-
-    try {
-      const result = await fal.subscribe(model, { input, logs: true });
-
-      const resultData = result.data as {
-        images?: Array<{ url: string }>;
-      };
-
-      const resultUrls = resultData.images?.map((img: { url: string }) => img.url) ?? [];
-
-      return { success: true, resultUrls };
-    } catch (err) {
-      const e = err as { status?: number; body?: unknown; message?: string };
-      const falMessage = extractFalMessage(e);
-
-      // Log the full fal error body once so we can diagnose new error shapes
-      // without the user needing to DevTools the renderer.
-      console.error(
-        '[generate:image] fal error — status:',
-        e?.status,
-        '\nmessage:',
-        e?.message,
-        '\nbody:',
-        JSON.stringify(e?.body, null, 2),
-      );
-
-      // Check credits BEFORE auth — fal sometimes returns 401/403 with a
-      // credits message in the body, and we want to surface that correctly
-      // rather than telling the user their key is broken.
-      if (isOutOfCredits(e?.status, falMessage)) {
-        throw new Error(OUT_OF_CREDITS_MESSAGE);
+        return { success: true, resultUrls };
+      } catch (error) {
+        log.error('OpenAI image generation failed', {
+          status: error instanceof APIError ? error.status : undefined,
+          code: error instanceof APIError ? error.code : undefined,
+        });
+        return { success: false, error: friendlyError(error) };
       }
-
-      if (isAuthFailure(e?.status, falMessage)) {
-        throw new Error(INVALID_KEY_MESSAGE);
-      }
-
-      if (e?.status === 422) {
-        console.error(
-          '[generate:image] 422 ValidationError — fal detail:',
-          JSON.stringify(e.body, null, 2),
-          '\nmodel:',
-          model,
-          '\ninput keys:',
-          Object.keys(input),
-          '\nimage_urls count:',
-          hasReferenceImages ? resolvedUrls.length : 0,
-        );
-
-        // Safety-filter refusals come through as 422s with a generic
-        // Gemini message. Detect and surface a useful error instead of
-        // the generic validation one.
-        if (isSafetyBlock(falMessage)) {
-          throw new Error(SAFETY_BLOCK_MESSAGE);
-        }
-
-        const details =
-          (e.body as { detail?: Array<{ loc?: unknown[]; msg?: string; type?: string }> })
-            ?.detail ?? [];
-        const msg = details
-          .map((d) => `${(d.loc ?? []).join('.')}: ${d.msg ?? d.type ?? 'invalid'}`)
-          .join('; ');
-        console.error('[generate:image] validation detail:', msg);
-        throw new Error(VALIDATION_MESSAGE);
-      }
-      throw err;
-    }
-  });
+    },
+  );
 }

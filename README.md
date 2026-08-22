@@ -1,7 +1,7 @@
-# King
+# OptiMate Image Editor
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/KenKaiii/king/main/build/icon.png" alt="King" width="200">
+  <img src="https://raw.githubusercontent.com/Optimisedigi/king-app/main/build/icon.png" alt="OptiMate Image Editor" width="200">
 </p>
 
 <p align="center">
@@ -9,13 +9,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/KenKaiii/king/releases/latest"><img src="https://img.shields.io/github/v/release/KenKaiii/king?include_prereleases&style=for-the-badge" alt="GitHub release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
+  <a href="https://github.com/Optimisedigi/king-app/releases/latest"><img src="https://img.shields.io/github/v/release/Optimisedigi/king-app?include_prereleases&style=for-the-badge" alt="GitHub release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg?style=for-the-badge" alt="AGPL-3.0-or-later License"></a>
   <a href="https://youtube.com/@kenkaidoesai"><img src="https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="YouTube"></a>
   <a href="https://skool.com/kenkai"><img src="https://img.shields.io/badge/Skool-Community-7C3AED?style=for-the-badge" alt="Skool"></a>
 </p>
 
-**King** is where e-commerce sellers generate product shots, run their stores, and manage their ads — all in one desktop app.
+**OptiMate Image Editor** is where e-commerce sellers generate product shots, run their stores, and manage their ads — all in one desktop app.
 
 160+ proven prompts. Reusable products and characters. Shopify, Amazon, Shopee connections. Facebook Ads, Google Ads, TikTok Shop dashboards. One app. Your whole creative stack.
 
@@ -27,7 +27,7 @@ E-commerce runs on volume. Ten new creatives a week. Three new hero shots per la
 
 Most AI tools treat product generation like a toy — upload once, generate once, pay per shot. Every other tool in your stack lives in a different browser tab. Your prompts live in a Notes doc. Your product photos live in iCloud. Your ad creatives live in Canva. Your stores live in six different admin panels.
 
-King pulls it all together. Your products, your characters, your prompts, your stores, your ads — one native app that holds everything and gets faster the longer you use it.
+OptiMate Image Editor pulls it all together. Your products, your characters, your prompts, your stores, your ads — one native app that holds everything and gets faster the longer you use it.
 
 ---
 
@@ -35,17 +35,17 @@ King pulls it all together. Your products, your characters, your prompts, your s
 
 ### 160+ production-ready prompts
 
-Every prompt in King has been tested. Packshot, lifestyle, beauty, health, food & drink, fashion, home, pet, social & ads, cinematic, nature — eleven categories covering every e-commerce product type you'll ever sell.
+Every prompt in OptiMate Image Editor has been tested. Packshot, lifestyle, beauty, health, food & drink, fashion, home, pet, social & ads, cinematic, nature — eleven categories covering every e-commerce product type you'll ever sell.
 
 Preview image for every prompt. Click, insert, generate. Stop rewriting "cinematic product shot on marble, soft shadows, 4:5 aspect ratio" for the fortieth time.
 
-King tracks what you use. The prompts you actually click rise to the top — your personal library builds itself.
+OptiMate Image Editor tracks what you use. The prompts you actually click rise to the top — your personal library builds itself.
 
 ### Generate product shots with reference images
 
-Upload your actual product. King uses it as visual reference and generates new shots — different angles, scenes, lighting, backdrops. Marble flat lay. Held in hand. Pastel gradient. Lifestyle context. Editorial hero. Amazon packshot. Any aspect ratio — 1:1, 4:5, 9:16, 16:9, 3:4, 5:4, 3:2 — all the marketplace and ad formats.
+Upload your actual product. OptiMate Image Editor uses it as visual reference and generates new shots — different angles, scenes, lighting, backdrops. Marble flat lay. Held in hand. Pastel gradient. Lifestyle context. Editorial hero. Amazon packshot. Any aspect ratio — 1:1, 4:5, 9:16, 16:9, 3:4, 5:4, 3:2 — all the marketplace and ad formats.
 
-Runs on fal.ai's nano-banana-2 and nano-banana-2/edit. Fast, sharp, actually looks like your product.
+Runs directly on OpenAI's latest GPT Image model (`gpt-image-2`) for generation and multi-image editing.
 
 ### Products library
 
@@ -63,7 +63,7 @@ Stack them with a product prompt and generate "this model holding this product i
 
 API key vault for every platform that matters:
 
-- **fal.ai** — image generation
+- **OpenAI** — GPT Image generation and editing
 - **Shopify** — product and order sync
 - **Amazon** — listing data
 - **Shopee** — product data from Shopee stores
@@ -91,16 +91,16 @@ New models, new prompt packs, new integrations — pushed through GitHub release
 
 ### Download
 
-| Platform | Link |
-|----------|------|
-| Mac — Apple Silicon (M1/M2/M3/M4) | [Download](https://github.com/KenKaiii/king/releases/latest) |
-| Mac — Intel | [Download](https://github.com/KenKaiii/king/releases/latest) |
-| Windows | [Download](https://github.com/KenKaiii/king/releases/latest) |
+| Platform                          | Link                                                               |
+| --------------------------------- | ------------------------------------------------------------------ |
+| Mac — Apple Silicon (M1/M2/M3/M4) | [Download](https://github.com/Optimisedigi/king-app/releases/latest) |
+| Mac — Intel                       | [Download](https://github.com/Optimisedigi/king-app/releases/latest) |
+| Windows                           | [Download](https://github.com/Optimisedigi/king-app/releases/latest) |
 
 ### Setup
 
 1. Install it
-2. Open the APIs page → paste your [fal.ai key](https://fal.ai/dashboard/keys)
+2. Open the APIs page → paste your [OpenAI API key](https://platform.openai.com/api-keys)
 3. Add a product — upload 2-3 reference images
 4. Pick a prompt from the library, generate
 
@@ -111,7 +111,7 @@ Add your other integrations (Shopify, Facebook Ads, etc.) from the same APIs pag
 ## Privacy
 
 - Everything stored locally on your machine
-- Image generation calls go to fal.ai (that's how it works)
+- Image prompts and reference images are sent directly to OpenAI for generation
 - API keys stored in the OS keychain, not a cloud server
 - No analytics, no telemetry, no tracking
 
@@ -120,13 +120,13 @@ Add your other integrations (Shopify, Facebook Ads, etc.) from the same APIs pag
 ## For developers
 
 ```bash
-git clone https://github.com/KenKaiii/king.git
-cd king
+git clone https://github.com/Optimisedigi/king-app.git
+cd king-app
 npm install
 npm run dev
 ```
 
-Stack: Electron + React 19 + Tailwind v4 + fal.ai
+Stack: Electron + React 19 + Tailwind v4 + OpenAI Images API
 
 ---
 

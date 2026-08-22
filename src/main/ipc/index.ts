@@ -21,8 +21,7 @@ import { secureHandle } from './validateSender';
 // `src/renderer/src/pages/ApisPage.tsx` and anywhere else we surface an
 // external link. Exact-match or suffix match (`.endsWith('.' + host)`).
 const ALLOWED_EXTERNAL_HOSTS = new Set<string>([
-  'fal.ai',
-  'docs.fal.ai',
+  'platform.openai.com',
   'github.com',
   'open.shopee.com',
   'ads.google.com',

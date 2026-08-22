@@ -5,26 +5,15 @@
 // prompt deliberately avoids prescribing a quality level and tells the
 // model to inherit whatever look Image 1 has.
 //
-// April-2026 safety-aware framing: Google's March-2026 policy tightening
-// classifies "scene + real-person-photo → new image" as Deepfake /
-// scene-fabrication content at the policy layer (safety_tolerance
-// doesn't help here — it's Layer 2, not Layer 1). To reduce refusal
-// rate, the prompt reframes the request as creative editorial work
-// produced with the subject's consent, and uses "reimagine the
-// composition" language (not "recreate", "reshoot", "replace", or
-// "swap"). Patterns validated in the April-2026 community:
-//   - Rohan Paul's selfie-with-character prompt (r/Bard, still working)
-//   - prompting.systems Character Consistency Guide (March 2026)
-//   - ImagineArt "reference person, preserve facial features" idiom
-//   - Google's canonical [REFERENCES] / [RELATIONSHIP] block structure
-
+// Keeping the edit framed as a faithful scene recreation helps preserve the
+// source composition while making the requested character replacement explicit.
 export const CLONE_GENERATION_COUNT = 4;
-export const CLONE_RESOLUTION = '2K';
+export const CLONE_RESOLUTION = 'medium';
 export const CLONE_OUTPUT_FORMAT = 'png';
 
 /**
- * Build the prompt sent to Nano Banana Pro for cloning a reference image
- * with a different character inserted.
+ * Build the prompt sent to GPT Image 2 for cloning a reference image with a
+ * different character inserted.
  *
  * @param tweaks       Optional free-text tweaks (e.g. "change the dress
  *   from black to red"). Users can wrap ad-copy in double quotes to get

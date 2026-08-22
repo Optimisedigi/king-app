@@ -13,10 +13,8 @@ import {
   ImageAddIcon,
 } from '@/components/icons';
 import {
-  nanoBananaAspectRatioOptions,
-  gptImage2AspectRatioOptions,
-  nanoBananaResolutionOptions,
-  gptImage2QualityOptions,
+  aspectRatioOptions,
+  qualityOptions,
   outputFormatOptions,
   MAX_REFERENCE_IMAGES,
   MAX_IMAGE_SIZE_MB,
@@ -25,14 +23,6 @@ import {
   SUPPORTED_IMAGE_MIME_REGEX,
 } from '@/lib/constants/image-form';
 import { renderPrompt } from '@/lib/productTypes';
-import { useModelStore, type ImageModel } from '@/stores/modelStore';
-
-// Same option list the Settings modal uses — kept in lockstep so the
-// labels don't drift between surfaces.
-const MODEL_OPTIONS: { value: ImageModel; label: string }[] = [
-  { value: 'nano_banana_pro', label: 'Nano Banana Pro' },
-  { value: 'gpt_image_2', label: 'GPT Image 2' },
-];
 import type { EntityData } from '@/types/electron';
 
 interface ReferenceImage {
@@ -63,32 +53,13 @@ export default function ImagePromptForm({
   recreateData,
   editData,
 }: ImagePromptFormProps) {
-  const selectedModel = useModelStore((s) => s.selectedModel);
-  const setSelectedModel = useModelStore((s) => s.setSelectedModel);
-  const isGpt = selectedModel === 'gpt_image_2';
-  const aspectRatioOptions = isGpt ? gptImage2AspectRatioOptions : nanoBananaAspectRatioOptions;
-  const resolutionOptions = isGpt ? gptImage2QualityOptions : nanoBananaResolutionOptions;
-
   const [prompt, setPrompt] = useState(initialPrompt);
   const [selectedEntity, setSelectedEntity] = useState('none');
   const [imageCount, setImageCount] = useState(1);
   const [aspectRatio, setAspectRatio] = useState('1:1');
-  const [resolution, setResolution] = useState(isGpt ? 'high' : '1K');
+  const [resolution, setResolution] = useState('high');
   const [outputFormat, setOutputFormat] = useState('png');
 
-  // Reconcile selections when the user switches models from Settings.
-  // Both ratio and resolution have model-specific value sets — if the
-  // current selection isn't valid for the new model, snap to a sensible
-  // default rather than rendering a blank dropdown label.
-  useEffect(() => {
-    if (!aspectRatioOptions.some((o) => o.value === aspectRatio)) {
-      setAspectRatio('1:1');
-    }
-    if (!resolutionOptions.some((o) => o.value === resolution)) {
-      setResolution(isGpt ? 'high' : '1K');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedModel]);
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
   const [products, setProducts] = useState<EntityData[]>([]);
   const [characters, setCharacters] = useState<EntityData[]>([]);
@@ -378,13 +349,6 @@ export default function ImagePromptForm({
           {/* Controls row */}
           <div className="flex h-9 items-center gap-2">
             <SelectDropdown
-              options={MODEL_OPTIONS}
-              value={selectedModel}
-              onChange={(v) => setSelectedModel(v as ImageModel)}
-              icon={<SparkleIcon />}
-            />
-
-            <SelectDropdown
               options={entityOptions}
               value={selectedEntity}
               onChange={handleEntityChange}
@@ -423,7 +387,7 @@ export default function ImagePromptForm({
             />
 
             <SelectDropdown
-              options={resolutionOptions}
+              options={qualityOptions}
               value={resolution}
               onChange={setResolution}
               icon={<ResolutionIcon />}

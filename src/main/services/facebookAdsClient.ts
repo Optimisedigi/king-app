@@ -242,7 +242,7 @@ async function paginateAll<T>(
   let next: string | undefined = url.toString();
   // Cap at 20 pages to avoid runaway loops on an unexpectedly huge account.
   for (let i = 0; i < 20 && next; i++) {
-    const res = await fetch(next, { method: 'GET' });
+    const res: Response = await fetch(next, { method: 'GET' });
     const page = await parseJsonOrThrow<FbPage_<T>>(res);
     out.push(...page.data);
     next = page.paging?.next;

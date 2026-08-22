@@ -1,19 +1,19 @@
 {
-  "name": "king",
+  "name": "optimate-image-editor",
   "version": "1.1.5",
-  "description": "King — the desktop command center for e-commerce creative. Generate scroll-stopping product shots, manage products, characters, and prompts, and run Shopify, Amazon, Shopee, Facebook Ads, Google Ads, and TikTok Shop from one native Mac + Windows app.",
+  "description": "OptiMate Image Editor — an e-commerce desktop app for generating product images, managing creative assets, and running connected storefront and advertising workflows.",
   "main": "./out/main/index.js",
   "author": {
     "name": "Ken Kai",
     "url": "https://youtube.com/@kenkaidoesai"
   },
-  "homepage": "https://github.com/KenKaiii/king",
+  "homepage": "https://github.com/Optimisedigi/king-app",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/KenKaiii/king.git"
+    "url": "git+https://github.com/Optimisedigi/king-app.git"
   },
   "bugs": {
-    "url": "https://github.com/KenKaiii/king/issues"
+    "url": "https://github.com/Optimisedigi/king-app/issues"
   },
   "funding": "https://skool.com/kenkai",
   "scripts": {
@@ -48,16 +48,16 @@
     "facebook-ads",
     "google-ads",
     "tiktok-shop",
-    "fal-ai",
+    "openai",
     "electron",
     "desktop-app"
   ],
   "license": "AGPL-3.0-or-later",
   "dependencies": {
-    "@fal-ai/client": "^1.10.0",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.8.3",
     "motion": "^12.38.0",
+    "openai": "7.5.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-virtuoso": "^4.18.1",
@@ -90,8 +90,8 @@
     "vitest": "^4.0.18"
   },
   "build": {
-    "appId": "com.unstablemind.king",
-    "productName": "King",
+    "appId": "com.optimisedigi.optimate-image-editor",
+    "productName": "OptiMate Image Editor",
     "copyright": "Copyright © 2026 Ken Kai",
     "directories": {
       "buildResources": "build",
@@ -172,7 +172,7 @@
       "deleteAppDataOnUninstall": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "King"
+      "shortcutName": "OptiMate Image Editor"
     },
     "publish": {
       "provider": "github",

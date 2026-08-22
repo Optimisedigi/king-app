@@ -335,16 +335,16 @@ export default function ApisPage() {
   const cards: ServiceCardProps[] = [
     {
       variant: 'simpleToken',
-      name: 'fal.ai',
-      description: 'Powers AI image generation',
-      keyUrl: 'https://fal.ai/dashboard/keys',
-      keyUrlLabel: 'Get your key',
-      placeholder: 'Paste your fal.ai key here',
-      saved: !!savedKeys.fal,
-      maskedKey: savedKeys.fal?.maskedKey,
-      saving: savingService === 'fal',
-      onSave: (v) => saveSimpleToken('fal', v),
-      onDelete: () => handleDelete('fal'),
+      name: 'OpenAI',
+      description: 'Powers GPT Image 2 generation and editing',
+      keyUrl: 'https://platform.openai.com/api-keys',
+      keyUrlLabel: 'Get your API key',
+      placeholder: 'Paste your OpenAI API key here',
+      saved: !!savedKeys.openai,
+      maskedKey: savedKeys.openai?.maskedKey,
+      saving: savingService === 'openai',
+      onSave: (v) => saveSimpleToken('openai', v),
+      onDelete: () => handleDelete('openai'),
     },
     {
       variant: 'oauth',
@@ -534,7 +534,8 @@ export default function ApisPage() {
             API <span className="text-[var(--base-color-brand--cinamon)]">Keys</span>
           </h2>
           <p className="text-sm text-[var(--base-color-brand--umber)]">
-            Hook up the apps you use so King can pull your data and post on your behalf.
+            Hook up the apps you use so OptiMate Image Editor can pull your data and post on your
+            behalf.
           </p>
         </section>
 
