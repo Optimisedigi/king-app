@@ -59,6 +59,10 @@ export default function ApisPage() {
   const [tiktokSummary, setTiktokSummary] = useState<TikTokSummary | null>(null);
   const [shopeeSummary, setShopeeSummary] = useState<ShopeeSummary | null>(null);
   const [amazonSummary, setAmazonSummary] = useState<AmazonSummary | null>(null);
+  const [openaiOAuthStatus, setOpenaiOAuthStatus] = useState<{
+    connected: boolean;
+    accountId?: string;
+  } | null>(null);
 
   const fetchKeys = useCallback(async () => {
     try {
@@ -72,6 +76,20 @@ export default function ApisPage() {
   useEffect(() => {
     void fetchKeys();
   }, [fetchKeys]);
+
+  // Check OpenAI OAuth status on mount.
+  useEffect(() => {
+    let cancelled = false;
+    void window.api.openaiOAuth
+      .status()
+      .then((status) => {
+        if (!cancelled) setOpenaiOAuthStatus(status);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Refresh per-platform summaries when their saved-state changes.
   useEffect(() => {
@@ -306,6 +324,29 @@ export default function ApisPage() {
     }
   };
 
+  const handleOpenAILogin = async () => {
+    setSavingService('openai-oauth');
+    try {
+      const result = await window.api.openaiOAuth.login();
+      setOpenaiOAuthStatus(result);
+      toast.success('Connected to OpenAI.');
+    } catch (err) {
+      toast.error(`OpenAI: ${err instanceof Error ? err.message : 'Connection failed'}`);
+    } finally {
+      setSavingService(null);
+    }
+  };
+
+  const handleOpenAILogout = async () => {
+    try {
+      await window.api.openaiOAuth.logout();
+      setOpenaiOAuthStatus({ connected: false });
+      toast.success('Disconnected from OpenAI.');
+    } catch {
+      toast.error('Could not disconnect. Please try again.');
+    }
+  };
+
   const handleConnectOAuth = async (serviceId: 'google-ads' | 'tiktok' | 'shopee' | 'amazon') => {
     const apis = {
       'google-ads': window.api.googleAds,
@@ -345,6 +386,34 @@ export default function ApisPage() {
       saving: savingService === 'openai',
       onSave: (v) => saveSimpleToken('openai', v),
       onDelete: () => handleDelete('openai'),
+    },
+    {
+      variant: 'oauth',
+      name: 'OpenAI Account',
+      description: 'Generate images via your ChatGPT subscription',
+      keyUrl: 'https://chatgpt.com/',
+      keyUrlLabel: 'Sign in',
+      saved: openaiOAuthStatus?.connected ?? false,
+      maskedKey: openaiOAuthStatus?.accountId
+        ? `Account ${openaiOAuthStatus.accountId}`
+        : undefined,
+      saving: savingService === 'openai-oauth',
+      onConnect: handleOpenAILogin,
+      onDelete: handleOpenAILogout,
+      buttonLabel: 'Connect OpenAI',
+    },
+    {
+      variant: 'simpleToken',
+      name: 'fal.ai',
+      description: 'Powers AI image generation (Nano Banana Pro, GPT Image 2)',
+      keyUrl: 'https://fal.ai/dashboard/keys',
+      keyUrlLabel: 'Get your key',
+      placeholder: 'Paste your fal.ai key here',
+      saved: !!savedKeys.fal,
+      maskedKey: savedKeys.fal?.maskedKey,
+      saving: savingService === 'fal',
+      onSave: (v) => saveSimpleToken('fal', v),
+      onDelete: () => handleDelete('fal'),
     },
     {
       variant: 'oauth',

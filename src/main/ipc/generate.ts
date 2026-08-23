@@ -1,10 +1,36 @@
 import { readFileSync, statSync } from 'fs';
 import { basename, extname } from 'path';
-import OpenAI, { APIError, toFile, type Uploadable } from 'openai';
+import OpenAI, { APIError, toFile } from 'openai';
 import log from 'electron-log/main';
 import { getApiKey } from '../services/apiKeyStore';
+import { getValidAccessToken } from '../services/openaiOAuth';
 import { resolveLocalFileUrl } from '../services/paths';
 import { secureHandle } from './validateSender';
+
+export type ImageProvider = 'openai-api' | 'openai-oauth' | 'fal';
+
+export interface GenerateImageInput {
+  prompt: string;
+  count?: number;
+  aspectRatio?: string;
+  resolution?: string;
+  outputFormat?: string;
+  imageUrls?: string[];
+  /** Which generation backend to use. Defaults to 'openai-api'. */
+  provider?: ImageProvider;
+  /** fal.ai model variant — only used when provider is 'fal'. */
+  modelVariant?: 'nano_banana_pro' | 'gpt_image_2';
+}
+
+export interface GenerateImageResult {
+  success: boolean;
+  resultUrls?: string[];
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
 
 const IMAGE_MODEL = 'gpt-image-2';
 const MAX_PROMPT_LENGTH = 32_000;
@@ -22,21 +48,6 @@ const TRUSTED_REMOTE_IMAGE_HOSTS = [
   'tiktokcdn.com',
   'tiktokcdn-us.com',
 ];
-
-export interface GenerateImageInput {
-  prompt: string;
-  count?: number;
-  aspectRatio?: string;
-  resolution?: string;
-  outputFormat?: string;
-  imageUrls?: string[];
-}
-
-export interface GenerateImageResult {
-  success: boolean;
-  resultUrls?: string[];
-  error?: string;
-}
 
 function isTrustedRemoteImageHost(hostname: string): boolean {
   return TRUSTED_REMOTE_IMAGE_HOSTS.some(
@@ -66,7 +77,6 @@ function assertReferenceSize(size: number): void {
 
 async function readReferenceResponse(response: Response): Promise<Buffer> {
   if (!response.body) throw new Error('Reference image response was empty.');
-
   const chunks: Buffer[] = [];
   let size = 0;
   const reader = response.body.getReader();
@@ -82,7 +92,7 @@ async function readReferenceResponse(response: Response): Promise<Buffer> {
   return Buffer.concat(chunks, size);
 }
 
-async function referenceToFile(source: string, index: number): Promise<Uploadable> {
+async function referenceToFile(source: string, index: number): Promise<File> {
   if (source.startsWith('data:')) {
     const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/i.exec(source);
     if (!match?.[1] || !match[2] || !SUPPORTED_MIME_TYPES.has(match[1].toLowerCase())) {
@@ -125,11 +135,18 @@ async function referenceToFile(source: string, index: number): Promise<Uploadabl
   return toFile(
     buffer,
     `reference-${index}.${mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1]}`,
-    {
-      type: mimeType,
-    },
+    { type: mimeType },
   );
 }
+
+async function referenceToDataUrl(source: string, index: number): Promise<string> {
+  const file = await referenceToFile(source, index);
+  return `data:${file.type};base64,${Buffer.from(await file.arrayBuffer()).toString('base64')}`;
+}
+
+// ---------------------------------------------------------------------------
+// Input normalisation
+// ---------------------------------------------------------------------------
 
 const IMAGE_SIZES: Record<string, string> = {
   '1:1': '1024x1024',
@@ -144,7 +161,9 @@ const IMAGE_SIZES: Record<string, string> = {
   '21:9': '1680x720',
 };
 
-function normaliseInput(data: GenerateImageInput): Required<GenerateImageInput> {
+function normaliseInput(
+  data: GenerateImageInput,
+): Required<Omit<GenerateImageInput, 'modelVariant'>> & { modelVariant?: string } {
   const prompt = typeof data.prompt === 'string' ? data.prompt.trim() : '';
   if (!prompt || prompt.length > MAX_PROMPT_LENGTH) {
     throw new Error('Prompt must be between 1 and 32,000 characters.');
@@ -178,10 +197,27 @@ function normaliseInput(data: GenerateImageInput): Required<GenerateImageInput> 
   if (!['png', 'jpeg', 'webp'].includes(outputFormat))
     throw new Error('Unsupported output format.');
 
-  return { prompt, count, aspectRatio, resolution, outputFormat, imageUrls };
+  const provider: ImageProvider = data.provider ?? 'openai-api';
+  if (!['openai-api', 'openai-oauth', 'fal'].includes(provider))
+    throw new Error('Unsupported image provider.');
+
+  return {
+    prompt,
+    count,
+    aspectRatio,
+    resolution,
+    outputFormat,
+    imageUrls,
+    provider,
+    modelVariant: data.modelVariant,
+  };
 }
 
-function friendlyError(error: unknown): string {
+// ---------------------------------------------------------------------------
+// Path 1: OpenAI API Key (existing)
+// ---------------------------------------------------------------------------
+
+function friendlyOpenAIError(error: unknown): string {
   if (error instanceof APIError) {
     if (error.status === 401) return 'OpenAI rejected the API key. Update it on the APIs page.';
     if (error.status === 429)
@@ -192,46 +228,353 @@ function friendlyError(error: unknown): string {
   return error instanceof Error ? error.message : 'Image generation failed.';
 }
 
+async function generateViaApiKey(
+  data: ReturnType<typeof normaliseInput>,
+): Promise<GenerateImageResult> {
+  const apiKey = getApiKey('openai');
+  if (!apiKey) throw new Error('Add your OpenAI API key on the APIs page first.');
+
+  const openai = new OpenAI({ apiKey });
+  const common = {
+    model: IMAGE_MODEL,
+    prompt: data.prompt,
+    n: data.count,
+    size: data.aspectRatio === 'auto' ? ('auto' as const) : IMAGE_SIZES[data.aspectRatio],
+    quality: data.resolution as 'auto' | 'low' | 'medium' | 'high',
+    output_format: data.outputFormat as 'png' | 'jpeg' | 'webp',
+  };
+
+  const response = data.imageUrls.length
+    ? await openai.images.edit({
+        ...common,
+        image: await Promise.all(data.imageUrls.map(referenceToFile)),
+        input_fidelity: 'high',
+      })
+    : await openai.images.generate(common);
+
+  const resultUrls = (response.data ?? [])
+    .map((image) => image.b64_json)
+    .filter((image): image is string => Boolean(image))
+    .map((image) => `data:image/${data.outputFormat};base64,${image}`);
+  if (!resultUrls.length) throw new Error('OpenAI returned no images.');
+
+  return { success: true, resultUrls };
+}
+
+// ---------------------------------------------------------------------------
+// Path 2: OpenAI OAuth (Codex endpoint with image_generation tool)
+// ---------------------------------------------------------------------------
+
+async function generateViaOAuth(
+  data: ReturnType<typeof normaliseInput>,
+  onProgress?: (message: string) => void,
+): Promise<GenerateImageResult> {
+  const accessToken = await getValidAccessToken();
+  const referenceImageUrls = await Promise.all(data.imageUrls.map(referenceToDataUrl));
+  const resultUrls: string[] = [];
+
+  for (let i = 0; i < data.count; i++) {
+    if (data.count > 1) onProgress?.(`Generating ${i + 1}/${data.count}…`);
+
+    const sizeHint = data.aspectRatio === 'auto' ? '' : ` Size: ${data.aspectRatio}.`;
+    const qualityHint = data.resolution === 'auto' ? '' : ` Quality: ${data.resolution}.`;
+    const formatHint = data.outputFormat === 'png' ? '' : ` Format: ${data.outputFormat}.`;
+    const promptText = `Generate an image: ${data.prompt}.${sizeHint}${qualityHint}${formatHint}`;
+
+    const res = await fetch('https://chatgpt.com/backend-api/codex/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-5.4',
+        tools: [{ type: 'image_generation' }],
+        input: [
+          {
+            role: 'user',
+            content: [
+              { type: 'input_text', text: promptText },
+              ...referenceImageUrls.map((image_url) => ({ type: 'input_image', image_url })),
+            ],
+          },
+        ],
+        stream: true,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`OpenAI OAuth request failed (${res.status}): ${text}`);
+    }
+
+    // Parse SSE stream for image data
+    const imageData = await parseOAuthSSEStream(res);
+    if (!imageData) throw new Error('OpenAI OAuth returned no image.');
+    resultUrls.push(imageData);
+  }
+
+  return { success: true, resultUrls };
+}
+
+async function parseOAuthSSEStream(response: Response): Promise<string | null> {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let imageData: string | null = null;
+  let outputFormat = 'png';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const jsonStr = line.slice(6);
+      if (jsonStr === '[DONE]') continue;
+
+      try {
+        const event = JSON.parse(jsonStr) as Record<string, unknown>;
+
+        // Look for completed image_generation_call items
+        if (event.type === 'response.output_item.done') {
+          const item = event.item as Record<string, unknown> | undefined;
+          if (item?.type === 'image_generation_call' && typeof item.result === 'string') {
+            imageData = item.result;
+            if (typeof item.output_format === 'string') outputFormat = item.output_format;
+          }
+        }
+
+        // Also check for the added event in case result comes inline
+        if (event.type === 'response.output_item.added') {
+          const item = event.item as Record<string, unknown> | undefined;
+          if (item?.type === 'image_generation_call' && typeof item.result === 'string') {
+            imageData = item.result;
+            if (typeof item.output_format === 'string') outputFormat = item.output_format;
+          }
+        }
+      } catch {
+        // Skip malformed SSE lines
+      }
+    }
+  }
+
+  if (!imageData) return null;
+  return `data:image/${outputFormat};base64,${imageData}`;
+}
+
+// ---------------------------------------------------------------------------
+// Path 3: fal.ai (restored from git history)
+// ---------------------------------------------------------------------------
+
+// fal.ai model constants
+const NANO_BANANA_PRO_MODEL = 'fal-ai/nano-banana-pro';
+const NANO_BANANA_PRO_EDIT_MODEL = 'fal-ai/nano-banana-pro/edit';
+const GPT_IMAGE_2_MODEL = 'openai/gpt-image-2';
+const GPT_IMAGE_2_EDIT_MODEL = 'openai/gpt-image-2/edit';
+
+const FAL_MISSING_KEY_MESSAGE =
+  "Your image generator isn't connected yet. Open the APIs page and add your fal.ai key to get started.";
+const FAL_INVALID_KEY_MESSAGE =
+  "Your fal.ai key didn't work. Double-check it on the APIs page and save a fresh one if needed.";
+const FAL_OUT_OF_CREDITS_MESSAGE =
+  'Your fal.ai account is locked — usually because the balance ran out. If you just topped up, give it a minute to sync and try again. Otherwise top up at fal.ai/dashboard/billing.';
+const FAL_SAFETY_BLOCK_MESSAGE =
+  'Google blocked this one as a safety precaution. The filter is probabilistic — hitting Try again often works.';
+const FAL_VALIDATION_MESSAGE =
+  "Something about this request wasn't accepted. Try a different image or prompt.";
+
+function isSafetyBlock(message: string): boolean {
+  return /\b(unsafe content|did not generate the expected output|prohibited[_ ]content|image[_ ]safety)\b/i.test(
+    message,
+  );
+}
+
+function extractFalMessage(err: { body?: unknown; message?: string }): string {
+  const parts: string[] = [];
+  if (typeof err.message === 'string') parts.push(err.message);
+  const body = err.body as { detail?: unknown; message?: string; error?: string } | undefined;
+  if (body) {
+    if (typeof body.message === 'string') parts.push(body.message);
+    if (typeof body.error === 'string') parts.push(body.error);
+    if (typeof body.detail === 'string') parts.push(body.detail);
+    if (Array.isArray(body.detail)) {
+      for (const d of body.detail) {
+        if (d && typeof d === 'object' && 'msg' in d && typeof d.msg === 'string') {
+          parts.push(d.msg);
+        }
+      }
+    }
+  }
+  return parts.join(' | ');
+}
+
+function isOutOfCredits(status: number | undefined, message: string): boolean {
+  if (status === 402) return true;
+  return /\b(insufficient (balance|credits|funds)|out of credits|exhausted|quota|top up|billing|payment required)\b/i.test(
+    message,
+  );
+}
+
+function isAuthFailure(status: number | undefined, message: string): boolean {
+  if (status === 401 || status === 403) return true;
+  return /\b(unauthorized|invalid api key|invalid key|forbidden)\b/i.test(message);
+}
+
+function selectFalModel(variant: string, hasReferenceImages: boolean): string {
+  if (variant === 'gpt_image_2') {
+    return hasReferenceImages ? GPT_IMAGE_2_EDIT_MODEL : GPT_IMAGE_2_MODEL;
+  }
+  return hasReferenceImages ? NANO_BANANA_PRO_EDIT_MODEL : NANO_BANANA_PRO_MODEL;
+}
+
+function mapAspectToGptImageSize(aspectRatio: string): string {
+  switch (aspectRatio) {
+    case '1:1':
+      return 'square_hd';
+    case '4:3':
+      return 'landscape_4_3';
+    case '3:4':
+      return 'portrait_4_3';
+    case '16:9':
+      return 'landscape_16_9';
+    case '9:16':
+      return 'portrait_16_9';
+    case 'auto':
+      return 'auto';
+    default:
+      return 'auto';
+  }
+}
+
+function mapResolutionToGptQuality(resolution: string): 'low' | 'high' {
+  return resolution === 'low' || resolution === '1K' ? 'low' : 'high';
+}
+
+// fal.ai uses HEIC/HEIF for Gemini inputs
+const FAL_MIME_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
+};
+
+function resolveFalImageUrl(url: string): string {
+  if (url.startsWith('data:') || url.startsWith('http')) return url;
+  if (url.startsWith('local-file://')) {
+    const filePath = resolveLocalFileUrl(url);
+    if (!filePath) return url;
+    const buffer = readFileSync(filePath);
+    const ext = extname(filePath).toLowerCase();
+    const mime = FAL_MIME_TYPES[ext] || 'image/png';
+    return `data:${mime};base64,${buffer.toString('base64')}`;
+  }
+  return url;
+}
+
+async function generateViaFal(
+  data: ReturnType<typeof normaliseInput>,
+): Promise<GenerateImageResult> {
+  if (!process.env.FAL_KEY) throw new Error(FAL_MISSING_KEY_MESSAGE);
+
+  const { fal } = await import('@fal-ai/client');
+
+  const resolvedUrls = data.imageUrls
+    .map(resolveFalImageUrl)
+    .filter((u) => u.startsWith('data:') || u.startsWith('http'));
+
+  const hasReferenceImages = resolvedUrls.length > 0;
+  const variant = data.modelVariant === 'gpt_image_2' ? 'gpt_image_2' : 'nano_banana_pro';
+  const model = selectFalModel(variant, hasReferenceImages);
+
+  let input: Record<string, unknown>;
+  if (variant === 'gpt_image_2') {
+    input = {
+      prompt: data.prompt,
+      image_size: mapAspectToGptImageSize(data.aspectRatio),
+      quality: mapResolutionToGptQuality(data.resolution),
+      output_format: data.outputFormat,
+      num_images: 1,
+    };
+  } else {
+    input = {
+      prompt: data.prompt,
+      aspect_ratio: data.aspectRatio || '1:1',
+      resolution: data.resolution || '1K',
+      output_format: data.outputFormat,
+      num_images: 1,
+      safety_tolerance: '6',
+    };
+  }
+  if (resolvedUrls.length > 0) {
+    input.image_urls = resolvedUrls;
+  }
+
+  try {
+    const result = await fal.subscribe(model, { input, logs: true });
+    const resultData = result.data as { images?: Array<{ url: string }> };
+    const resultUrls = resultData.images?.map((img) => img.url) ?? [];
+    if (!resultUrls.length) throw new Error('fal.ai returned no images.');
+    return { success: true, resultUrls };
+  } catch (err) {
+    const e = err as { status?: number; body?: unknown; message?: string };
+    const falMessage = extractFalMessage(e);
+
+    log.error('[generate:fal] error', { status: e?.status, message: e?.message });
+
+    if (isOutOfCredits(e?.status, falMessage)) throw new Error(FAL_OUT_OF_CREDITS_MESSAGE);
+    if (isAuthFailure(e?.status, falMessage)) throw new Error(FAL_INVALID_KEY_MESSAGE);
+
+    if (e?.status === 422) {
+      if (isSafetyBlock(falMessage)) throw new Error(FAL_SAFETY_BLOCK_MESSAGE);
+      throw new Error(FAL_VALIDATION_MESSAGE);
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Handler registration
+// ---------------------------------------------------------------------------
+
 export function registerGenerateHandlers(): void {
   secureHandle(
     'generate:image',
     async (_event, rawData: GenerateImageInput): Promise<GenerateImageResult> => {
       try {
         const data = normaliseInput(rawData);
-        const apiKey = getApiKey('openai');
-        if (!apiKey) throw new Error('Add your OpenAI API key on the APIs page first.');
 
-        const openai = new OpenAI({ apiKey });
-        const common = {
-          model: IMAGE_MODEL,
-          prompt: data.prompt,
-          n: data.count,
-          size: data.aspectRatio === 'auto' ? ('auto' as const) : IMAGE_SIZES[data.aspectRatio],
-          quality: data.resolution as 'auto' | 'low' | 'medium' | 'high',
-          output_format: data.outputFormat as 'png' | 'jpeg' | 'webp',
-        };
-
-        const response = data.imageUrls.length
-          ? await openai.images.edit({
-              ...common,
-              image: await Promise.all(data.imageUrls.map(referenceToFile)),
-              input_fidelity: 'high',
-            })
-          : await openai.images.generate(common);
-
-        const resultUrls = (response.data ?? [])
-          .map((image) => image.b64_json)
-          .filter((image): image is string => Boolean(image))
-          .map((image) => `data:image/${data.outputFormat};base64,${image}`);
-        if (!resultUrls.length) throw new Error('OpenAI returned no images.');
-
-        return { success: true, resultUrls };
+        switch (data.provider) {
+          case 'openai-api':
+            return await generateViaApiKey(data);
+          case 'openai-oauth':
+            return await generateViaOAuth(data);
+          case 'fal':
+            return await generateViaFal(data);
+          default:
+            throw new Error(`Unknown provider: ${data.provider}`);
+        }
       } catch (error) {
-        log.error('OpenAI image generation failed', {
+        const provider = rawData.provider ?? 'openai-api';
+        log.error(`Image generation failed (provider: ${provider})`, {
           status: error instanceof APIError ? error.status : undefined,
-          code: error instanceof APIError ? error.code : undefined,
+          message: error instanceof Error ? error.message : String(error),
         });
-        return { success: false, error: friendlyError(error) };
+
+        // Use provider-specific friendly errors
+        if (provider === 'openai-api') {
+          return { success: false, error: friendlyOpenAIError(error) };
+        }
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Image generation failed.',
+        };
       }
     },
   );

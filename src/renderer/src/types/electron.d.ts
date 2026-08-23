@@ -175,6 +175,8 @@ export interface ElectronAPI {
       resolution: string;
       outputFormat: string;
       imageUrls: string[];
+      provider?: 'openai-api' | 'openai-oauth' | 'fal';
+      modelVariant?: 'nano_banana_pro' | 'gpt_image_2';
     }) => Promise<{ success: boolean; resultUrls?: string[]; error?: string }>;
   };
   files: {
@@ -313,6 +315,11 @@ export interface ElectronAPI {
       Array<{ id: string; status: string; total?: string; purchasedAt: string }>
     >;
     listCatalogItems: () => Promise<Array<{ asin: string; title?: string; brand?: string }>>;
+  };
+  openaiOAuth: {
+    login: () => Promise<{ connected: boolean; accountId?: string }>;
+    status: () => Promise<{ connected: boolean; accountId?: string }>;
+    logout: () => Promise<void>;
   };
   adReferences: {
     list: () => Promise<CustomAdReferenceData[]>;

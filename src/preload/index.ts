@@ -15,6 +15,8 @@ const api = {
       resolution: string;
       outputFormat: string;
       imageUrls: string[];
+      provider?: 'openai-api' | 'openai-oauth' | 'fal';
+      modelVariant?: 'nano_banana_pro' | 'gpt_image_2';
     }) => ipcRenderer.invoke('generate:image', data),
   },
   files: {
@@ -105,6 +107,11 @@ const api = {
     beginOAuth: () => ipcRenderer.invoke('amazon:beginOAuth'),
     listOrders: () => ipcRenderer.invoke('amazon:listOrders'),
     listCatalogItems: () => ipcRenderer.invoke('amazon:listCatalogItems'),
+  },
+  openaiOAuth: {
+    login: () => ipcRenderer.invoke('openaiOAuth:login'),
+    status: () => ipcRenderer.invoke('openaiOAuth:status'),
+    logout: () => ipcRenderer.invoke('openaiOAuth:logout'),
   },
   facebookAds: {
     status: () => ipcRenderer.invoke('facebookAds:status'),

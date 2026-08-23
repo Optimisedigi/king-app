@@ -4,6 +4,9 @@ import log from 'electron-log/main';
 import { getDataDir } from './paths';
 import { readJson, writeJsonAtomic, withJsonLock } from './atomicJson';
 
+/** Services whose keys should be mirrored into process.env for SDK clients. */
+const ENV_MAP: Record<string, string> = { fal: 'FAL_KEY' };
+
 /**
  * On-disk shape. `encryptedKey` is base64-encoded ciphertext from
  * `safeStorage.encryptString`. Legacy entries with plaintext `key` are
@@ -124,6 +127,10 @@ export async function setApiKey(service: string, key: string): Promise<void> {
     store.keys[service] = { encryptedKey: encrypt(key), savedAt: new Date().toISOString() };
     writeStoreRaw(store);
   });
+  // Mirror into process.env so SDK clients (e.g. fal-ai) pick it up without
+  // re-reading the encrypted file on every call.
+  const envVar = ENV_MAP[service];
+  if (envVar) process.env[envVar] = key;
 }
 
 export async function deleteApiKey(service: string): Promise<void> {
@@ -133,9 +140,65 @@ export async function deleteApiKey(service: string): Promise<void> {
     delete store.keys[service];
     writeStoreRaw(store);
   });
+  const envVar = ENV_MAP[service];
+  if (envVar) delete process.env[envVar];
+}
+
+/** Load saved keys into process.env on startup. */
+export function loadApiKeysIntoEnv(): void {
+  const store = readStore();
+  for (const [service, envVar] of Object.entries(ENV_MAP)) {
+    if (!process.env[envVar] && store.keys[service]?.encryptedKey) {
+      const plain = decrypt(store.keys[service].encryptedKey!);
+      if (plain) process.env[envVar] = plain;
+    }
+  }
 }
 
 function maskKey(key: string): string {
   if (key.length <= 12) return '****';
   return key.slice(0, 6) + '****' + key.slice(-4);
+}
+
+// ---- OAuth token storage (separate file, same safeStorage pattern) ----
+
+function getOAuthStorePath(): string {
+  return join(getDataDir(), 'oauth-tokens.json');
+}
+
+interface OAuthStore {
+  tokens: Record<string, unknown>;
+}
+
+export async function getOAuthTokens(service: string): Promise<unknown | null> {
+  const store = readJson<OAuthStore>(getOAuthStorePath(), { tokens: {} });
+  const entry = store.tokens[service];
+  if (!entry || typeof entry !== 'object') return null;
+  const stored = entry as { encryptedData?: string };
+  if (!stored.encryptedData) return null;
+  const plain = decrypt(stored.encryptedData);
+  if (!plain) return null;
+  try {
+    return JSON.parse(plain);
+  } catch {
+    return null;
+  }
+}
+
+export async function setOAuthTokens(service: string, tokens: unknown): Promise<void> {
+  const path = getOAuthStorePath();
+  await withJsonLock(path, () => {
+    const store = readJson<OAuthStore>(path, { tokens: {} });
+    store.tokens[service] = { encryptedData: encrypt(JSON.stringify(tokens)) };
+    writeJsonAtomic(path, store);
+  });
+}
+
+export async function clearOAuthTokens(service: string): Promise<void> {
+  const path = getOAuthStorePath();
+  await withJsonLock(path, () => {
+    const store = readJson<OAuthStore>(path, { tokens: {} });
+    delete store.tokens[service];
+    writeJsonAtomic(path, store);
+  });
 }

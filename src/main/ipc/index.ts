@@ -13,6 +13,7 @@ import { registerGoogleAdsHandlers } from './googleAds';
 import { registerTiktokShopHandlers } from './tiktokShop';
 import { registerShopeeHandlers } from './shopee';
 import { registerAmazonHandlers } from './amazon';
+import { registerOpenAIOAuthHandlers } from './openaiOAuth';
 import { registerUpdaterHandlers } from './updater';
 import { secureHandle } from './validateSender';
 
@@ -22,6 +23,8 @@ import { secureHandle } from './validateSender';
 // external link. Exact-match or suffix match (`.endsWith('.' + host)`).
 const ALLOWED_EXTERNAL_HOSTS = new Set<string>([
   'platform.openai.com',
+  'auth.openai.com',
+  'chatgpt.com',
   'github.com',
   'open.shopee.com',
   'ads.google.com',
@@ -63,6 +66,7 @@ export function registerIpcHandlers(): void {
   registerTiktokShopHandlers();
   registerShopeeHandlers();
   registerAmazonHandlers();
+  registerOpenAIOAuthHandlers();
   registerUpdaterHandlers();
 
   // Renderer errors (from React 19 root-level callbacks) funnel here so they

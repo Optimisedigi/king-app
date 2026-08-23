@@ -4,6 +4,7 @@ import { pathToFileURL } from 'url';
 import log from 'electron-log/main';
 import { registerIpcHandlers } from './ipc';
 import { resolveLocalFileUrl } from './services/paths';
+import { loadApiKeysIntoEnv } from './services/apiKeyStore';
 import { initUpdater, checkForUpdates } from './services/updater';
 import { startAgentApiServer, stopAgentApiServer } from './services/agentApiServer';
 
@@ -176,6 +177,7 @@ function setContentSecurityPolicy(): void {
 app.whenReady().then(() => {
   setContentSecurityPolicy();
   registerLocalFileProtocol();
+  loadApiKeysIntoEnv();
   registerIpcHandlers();
   startAgentApiServer();
   initUpdater();

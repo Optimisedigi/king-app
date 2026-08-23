@@ -122,6 +122,8 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     resolution: string;
     outputFormat: string;
     referenceImages: string[];
+    provider?: 'openai-api' | 'openai-oauth' | 'fal';
+    modelVariant?: 'nano_banana_pro' | 'gpt_image_2';
   }) => {
     const generationIds: string[] = [];
     for (let i = 0; i < data.count; i++) {
@@ -143,6 +145,8 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
             resolution: data.resolution,
             outputFormat: data.outputFormat,
             imageUrls: data.referenceImages,
+            provider: data.provider,
+            modelVariant: data.modelVariant,
           });
 
           if (!result.success || !result.resultUrls?.length) {

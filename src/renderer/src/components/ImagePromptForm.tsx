@@ -24,6 +24,9 @@ import {
 } from '@/lib/constants/image-form';
 import { renderPrompt } from '@/lib/productTypes';
 import type { EntityData } from '@/types/electron';
+import { useModelStore } from '@/stores/modelStore';
+
+type ImageProvider = 'openai-api' | 'openai-oauth' | 'fal';
 
 interface ReferenceImage {
   id: string;
@@ -41,6 +44,8 @@ interface ImagePromptFormProps {
     resolution: string;
     outputFormat: string;
     referenceImages: string[];
+    provider?: ImageProvider;
+    modelVariant?: 'nano_banana_pro' | 'gpt_image_2';
   }) => void;
   initialPrompt?: string;
   recreateData?: { prompt: string } | null;
@@ -59,6 +64,13 @@ export default function ImagePromptForm({
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [resolution, setResolution] = useState('high');
   const [outputFormat, setOutputFormat] = useState('png');
+  const [provider, setProvider] = useState<ImageProvider>('openai-api');
+  const [availableProviders, setAvailableProviders] = useState<ImageProvider[]>(['openai-api']);
+  const providerRef = useRef(provider);
+  useEffect(() => {
+    providerRef.current = provider;
+  }, [provider]);
+  const modelVariant = useModelStore((s) => s.selectedModel);
 
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
   const [products, setProducts] = useState<EntityData[]>([]);
@@ -82,6 +94,34 @@ export default function ImagePromptForm({
       }
     };
     fetchEntities();
+  }, []);
+
+  // Detect available image providers.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [keys, oauthStatus] = await Promise.all([
+          window.api.apiKeys.list(),
+          window.api.openaiOAuth.status().catch(() => ({ connected: false })),
+        ]);
+        if (cancelled) return;
+        const providers: ImageProvider[] = [];
+        if (keys.openai) providers.push('openai-api');
+        if (oauthStatus.connected) providers.push('openai-oauth');
+        if (keys.fal) providers.push('fal');
+        setAvailableProviders(providers);
+        // If current provider is no longer available, switch to the first.
+        if (providers.length > 0 && !providers.includes(providerRef.current)) {
+          setProvider(providers[0]!);
+        }
+      } catch {
+        /* silent */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Build entity selector options
@@ -245,6 +285,8 @@ export default function ImagePromptForm({
       resolution,
       outputFormat,
       referenceImages: uploadedImageUrls,
+      provider,
+      modelVariant,
     });
   };
 
@@ -348,6 +390,21 @@ export default function ImagePromptForm({
 
           {/* Controls row */}
           <div className="flex h-9 items-center gap-2">
+            {availableProviders.length > 1 && (
+              <SelectDropdown
+                options={availableProviders.map((p) => ({
+                  value: p,
+                  label:
+                    p === 'openai-api'
+                      ? 'OpenAI API'
+                      : p === 'openai-oauth'
+                        ? 'OpenAI Account'
+                        : 'fal.ai',
+                }))}
+                value={provider}
+                onChange={(v) => setProvider(v as ImageProvider)}
+              />
+            )}
             <SelectDropdown
               options={entityOptions}
               value={selectedEntity}
