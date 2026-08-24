@@ -8,6 +8,7 @@ import {
 } from '@/lib/constants/create-ads';
 import { pickVariant, type AdReference } from '@/lib/adReferences';
 import { useImagesStore } from '@/stores/imagesStore';
+import { cleanIpcError } from '@/lib/ipcError';
 import type { EntityData, GeneratedImageData } from '@/types/electron';
 
 export type StepId = 'ad' | 'product' | 'brief' | 'format' | 'results';
@@ -258,6 +259,8 @@ async function generateSingleSlot(
       url: firstUrl,
       prompt: inputs.prompt,
       aspectRatio: inputs.aspectRatio,
+      // This wizard always runs on the default OpenAI provider.
+      model: 'gpt_image_2',
     });
 
     // Push into the global gallery store so the Image page picks it up
@@ -266,7 +269,7 @@ async function generateSingleSlot(
 
     updateSlot({ status: 'success', image: saved });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Couldn't generate this one.";
+    const message = cleanIpcError(err, "Couldn't generate this one.");
     updateSlot({ status: 'error', error: message });
   }
 }

@@ -11,6 +11,7 @@ import {
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import { useImages } from '@/hooks';
 import { useGenerationStore } from '@/stores/generationStore';
+import { cleanIpcError } from '@/lib/ipcError';
 
 interface ImagePageProps {
   prefillPrompt?: string | null;
@@ -160,6 +161,10 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
               url,
               prompt: data.prompt,
               aspectRatio: data.aspectRatio,
+              // Only the fal path honours modelVariant; both OpenAI paths
+              // always generate with GPT Image 2.
+              model:
+                data.provider === 'fal' ? (data.modelVariant ?? 'nano_banana_pro') : 'gpt_image_2',
             });
 
             addImage(savedImage);
@@ -168,9 +173,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
 
           removeImageGeneration(generationId);
         } catch (err) {
-          toast.error(
-            err instanceof Error ? err.message : 'Something went wrong. Please try again.',
-          );
+          toast.error(cleanIpcError(err, 'Something went wrong. Please try again.'));
           removeImageGeneration(generationId);
         }
       }
