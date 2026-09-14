@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from 'fs';
 import { basename, extname } from 'path';
+import { nativeImage } from 'electron';
 import OpenAI, { APIError, toFile } from 'openai';
 import log from 'electron-log/main';
 import { getApiKey } from '../services/apiKeyStore';
@@ -164,9 +165,60 @@ async function referenceToFile(source: string, index: number): Promise<File> {
   );
 }
 
+// The Codex vision input is measured in 32x32 pixel patches and rejects
+// anything over 30,000 of them. Aim below that so rounding per axis can't
+// push a resized image back over the line.
+const PATCH_SIZE = 32;
+const MAX_IMAGE_PATCHES = 28_000;
+
+/** Patch count the vision tokenizer charges for an image of this size. */
+function patchCount(width: number, height: number): number {
+  return Math.ceil(width / PATCH_SIZE) * Math.ceil(height / PATCH_SIZE);
+}
+
+/**
+ * Shrink an oversized reference image to fit the vision patch budget,
+ * preserving its aspect ratio. Returns the original buffer untouched when the
+ * image already fits, or when Electron can't decode it (e.g. some WebP files)
+ * — in that case the request proceeds and the API decides.
+ */
+function downscaleToPatchBudget(
+  buffer: Buffer,
+  mimeType: string,
+): { buffer: Buffer; type: string } {
+  const image = nativeImage.createFromBuffer(buffer);
+  if (image.isEmpty()) return { buffer, type: mimeType };
+
+  const { width, height } = image.getSize();
+  if (!width || !height || patchCount(width, height) <= MAX_IMAGE_PATCHES) {
+    return { buffer, type: mimeType };
+  }
+
+  const scale = Math.sqrt((MAX_IMAGE_PATCHES * PATCH_SIZE * PATCH_SIZE) / (width * height));
+  const resized = image.resize({
+    width: Math.max(1, Math.floor(width * scale)),
+    height: Math.max(1, Math.floor(height * scale)),
+    quality: 'best',
+  });
+
+  // nativeImage only re-encodes as PNG or JPEG. Keep PNG for formats that may
+  // carry transparency so a cut-out product photo doesn't gain a black box.
+  if (mimeType === 'image/jpeg') {
+    return { buffer: resized.toJPEG(90), type: 'image/jpeg' };
+  }
+  return { buffer: resized.toPNG(), type: 'image/png' };
+}
+
 async function referenceToDataUrl(source: string, index: number): Promise<string> {
   const file = await referenceToFile(source, index);
-  return `data:${file.type};base64,${Buffer.from(await file.arrayBuffer()).toString('base64')}`;
+  const original = Buffer.from(await file.arrayBuffer());
+  const { buffer, type } = downscaleToPatchBudget(original, file.type);
+  if (buffer !== original) {
+    log.info(
+      `[generate] downscaled reference image ${index} from ${original.byteLength} to ${buffer.byteLength} bytes`,
+    );
+  }
+  return `data:${type};base64,${buffer.toString('base64')}`;
 }
 
 // ---------------------------------------------------------------------------
