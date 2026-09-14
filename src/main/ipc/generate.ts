@@ -668,6 +668,43 @@ async function generateViaFal(
 // Handler registration
 // ---------------------------------------------------------------------------
 
+/**
+ * Providers reject bursts with HTTP 429. The renderer already generates one
+ * image at a time, so a 429 means the account's own rate window is full rather
+ * than that we flooded it — waiting and retrying is the right response, and it
+ * keeps a long batch across many products from failing part-way through.
+ */
+const RATE_LIMIT_RETRIES = 3;
+const RATE_LIMIT_BACKOFF_MS = [4_000, 15_000, 40_000];
+
+/** Exported for tests: detects a provider rate-limit across all three paths. */
+export function isRateLimited(error: unknown): boolean {
+  if (error instanceof APIError) return error.status === 429;
+  // The OAuth and fal paths surface the status inside the message.
+  const status = (error as { status?: unknown } | null)?.status;
+  if (status === 429) return true;
+  return error instanceof Error && /\b429\b/.test(error.message);
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function generateWithProvider(
+  data: ReturnType<typeof normaliseInput>,
+): Promise<GenerateImageResult> {
+  switch (data.provider) {
+    case 'openai-api':
+      return generateViaApiKey(data);
+    case 'openai-oauth':
+      return generateViaOAuth(data);
+    case 'fal':
+      return generateViaFal(data);
+    default:
+      throw new Error(`Unknown provider: ${data.provider}`);
+  }
+}
+
 export function registerGenerateHandlers(): void {
   secureHandle(
     'generate:image',
@@ -675,15 +712,20 @@ export function registerGenerateHandlers(): void {
       try {
         const data = normaliseInput(rawData);
 
-        switch (data.provider) {
-          case 'openai-api':
-            return await generateViaApiKey(data);
-          case 'openai-oauth':
-            return await generateViaOAuth(data);
-          case 'fal':
-            return await generateViaFal(data);
-          default:
-            throw new Error(`Unknown provider: ${data.provider}`);
+        for (let attempt = 0; ; attempt++) {
+          try {
+            return await generateWithProvider(data);
+          } catch (error) {
+            if (!isRateLimited(error) || attempt >= RATE_LIMIT_RETRIES) throw error;
+            // Jitter stops several queued images retrying in lockstep.
+            const backoff = RATE_LIMIT_BACKOFF_MS[attempt] ?? 40_000;
+            const delay = backoff + Math.floor(Math.random() * 1_000);
+            log.warn(
+              `Rate limited by ${data.provider}; retrying in ${Math.round(delay / 1000)}s ` +
+                `(attempt ${attempt + 1}/${RATE_LIMIT_RETRIES})`,
+            );
+            await wait(delay);
+          }
         }
       } catch (error) {
         const provider = rawData.provider ?? 'openai-api';
