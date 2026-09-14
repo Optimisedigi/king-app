@@ -52,6 +52,26 @@ describe('buildGenerationJobs', () => {
     expect(new Set(jobs.map((j) => j.prompt))).toEqual(new Set([base]));
   });
 
+  it('keeps each product name so batch results stay identifiable', () => {
+    const jobs = buildGenerationJobs({
+      basePrompt: base,
+      targets: [target('p1', 'Cake', ['cake.png']), target('p2', 'Tart', ['tart.png'])],
+      count: 2,
+      idPrefix: 'test',
+    });
+    expect(jobs.map((j) => j.targetLabel)).toEqual(['Cake', 'Cake', 'Tart', 'Tart']);
+  });
+
+  it('leaves a single run unlabelled', () => {
+    const jobs = buildGenerationJobs({
+      basePrompt: base,
+      targets: [defaultTarget(['a.png'])],
+      count: 2,
+      idPrefix: 'test',
+    });
+    expect(jobs.every((j) => j.targetLabel === null)).toBe(true);
+  });
+
   it('sends each product only its own reference photos', () => {
     const jobs = buildGenerationJobs({
       basePrompt: base,

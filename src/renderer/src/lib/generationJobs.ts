@@ -73,7 +73,7 @@ export function buildGenerationJobs(options: {
       jobs.push({
         id: `${prefix}-${target.key}-${i}`,
         targetKey: target.key,
-        targetLabel: null,
+        targetLabel: target.label,
         angleId: null,
         prompt: basePrompt,
         referenceImages: target.referenceImages,
