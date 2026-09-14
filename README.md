@@ -45,7 +45,7 @@ OptiMate Image Editor tracks what you use. The prompts you actually click rise t
 
 Upload your actual product. OptiMate Image Editor uses it as visual reference and generates new shots — different angles, scenes, lighting, backdrops. Marble flat lay. Held in hand. Pastel gradient. Lifestyle context. Editorial hero. Amazon packshot. Any aspect ratio — 1:1, 4:5, 9:16, 16:9, 3:4, 5:4, 3:2 — all the marketplace and ad formats.
 
-Runs directly on OpenAI's latest GPT Image model (`gpt-image-2`) for generation and multi-image editing.
+Runs directly on OpenAI's GPT Image models for generation and multi-image editing — `gpt-image-2`, plus GPT Image 2.5 Flare (faster) and Sunburst (higher quality), selectable in Settings.
 
 ### Products library
 

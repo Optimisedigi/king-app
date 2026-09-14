@@ -7,6 +7,8 @@ import { useModelStore, type ImageModel } from '@/stores/modelStore';
 const MODEL_OPTIONS: { value: ImageModel; label: string }[] = [
   { value: 'nano_banana_pro', label: 'Nano Banana Pro' },
   { value: 'gpt_image_2', label: 'GPT Image 2' },
+  { value: 'gpt_image_25_flare', label: 'GPT Image 2.5 Flare' },
+  { value: 'gpt_image_25_sunburst', label: 'GPT Image 2.5 Sunburst' },
 ];
 
 interface SettingsModalProps {
@@ -185,8 +187,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </button>
         </div>
 
-        {/* Image model — routes every generation (Image, Clone, Create Ads)
-            through the chosen fal endpoint. */}
+        {/* Image model — applies to generations started from the Image page.
+            Clone and Create Ads still run on GPT Image 2. */}
         <section className="mt-6 rounded-2xl border border-[var(--base-color-brand--umber)]/30 bg-[var(--base-color-brand--champagne)]/60 px-4 py-3">
           <p
             className="text-sm font-semibold text-[var(--base-color-brand--bean)]"

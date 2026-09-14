@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import type { ImageModelId } from '@/types/electron';
 
-// Display labels for the fal models we support. Kept in sync with the
-// option labels in `ImagePromptForm` and `SettingsModal` so the detail
-// panel reads exactly the same name the user picked when generating.
+// Display labels for the models we support. Kept in sync with the option
+// labels in `SettingsModal` so the detail panel reads exactly the same
+// name the user picked when generating.
 const MODEL_LABELS: Record<ImageModelId, string> = {
   nano_banana_pro: 'Nano Banana Pro',
   gpt_image_2: 'GPT Image 2',
+  gpt_image_25_flare: 'GPT Image 2.5 Flare',
+  gpt_image_25_sunburst: 'GPT Image 2.5 Sunburst',
 };
 
 interface ImageDetailPanelProps {

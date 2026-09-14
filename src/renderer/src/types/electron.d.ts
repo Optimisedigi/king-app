@@ -1,4 +1,8 @@
-export type ImageModelId = 'nano_banana_pro' | 'gpt_image_2';
+export type ImageModelId =
+  | 'nano_banana_pro'
+  | 'gpt_image_2'
+  | 'gpt_image_25_flare'
+  | 'gpt_image_25_sunburst';
 
 export interface GeneratedImageData {
   id: string;
@@ -181,7 +185,7 @@ export interface ElectronAPI {
       outputFormat: string;
       imageUrls: string[];
       provider?: 'openai-api' | 'openai-oauth' | 'fal';
-      modelVariant?: 'nano_banana_pro' | 'gpt_image_2';
+      modelVariant?: ImageModelId;
     }) => Promise<{ success: boolean; resultUrls?: string[]; error?: string }>;
   };
   files: {

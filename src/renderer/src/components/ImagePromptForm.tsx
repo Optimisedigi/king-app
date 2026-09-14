@@ -23,7 +23,7 @@ import {
   SUPPORTED_IMAGE_MIME_REGEX,
 } from '@/lib/constants/image-form';
 import { renderPrompt } from '@/lib/productTypes';
-import type { EntityData } from '@/types/electron';
+import type { EntityData, ImageModelId } from '@/types/electron';
 import { useModelStore } from '@/stores/modelStore';
 
 type ImageProvider = 'openai-api' | 'openai-oauth' | 'fal';
@@ -45,7 +45,7 @@ interface ImagePromptFormProps {
     outputFormat: string;
     referenceImages: string[];
     provider?: ImageProvider;
-    modelVariant?: 'nano_banana_pro' | 'gpt_image_2';
+    modelVariant?: ImageModelId;
   }) => void;
   initialPrompt?: string;
   recreateData?: { prompt: string } | null;

@@ -12,6 +12,24 @@ import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import { useImages } from '@/hooks';
 import { useGenerationStore } from '@/stores/generationStore';
 import { cleanIpcError } from '@/lib/ipcError';
+import type { ImageModelId } from '@/types/electron';
+
+/**
+ * Which model name to record on the saved image, matching what actually
+ * produced it: fal honours every variant, and both OpenAI paths honour the
+ * GPT Image 2.5 variants (the API directly, OAuth via the hosted image
+ * tool's model field). Anything else on OpenAI runs GPT Image 2.
+ */
+function resolveSavedModel(
+  provider: 'openai-api' | 'openai-oauth' | 'fal' | undefined,
+  modelVariant: ImageModelId | undefined,
+): ImageModelId {
+  if (provider === 'fal') return modelVariant ?? 'nano_banana_pro';
+  if (modelVariant === 'gpt_image_25_flare' || modelVariant === 'gpt_image_25_sunburst') {
+    return modelVariant;
+  }
+  return 'gpt_image_2';
+}
 
 interface ImagePageProps {
   prefillPrompt?: string | null;
@@ -124,7 +142,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     outputFormat: string;
     referenceImages: string[];
     provider?: 'openai-api' | 'openai-oauth' | 'fal';
-    modelVariant?: 'nano_banana_pro' | 'gpt_image_2';
+    modelVariant?: ImageModelId;
   }) => {
     const generationIds: string[] = [];
     for (let i = 0; i < data.count; i++) {
@@ -161,10 +179,9 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
               url,
               prompt: data.prompt,
               aspectRatio: data.aspectRatio,
-              // Only the fal path honours modelVariant; both OpenAI paths
-              // always generate with GPT Image 2.
-              model:
-                data.provider === 'fal' ? (data.modelVariant ?? 'nano_banana_pro') : 'gpt_image_2',
+              // The fal path honours every variant; the OpenAI paths honour
+              // the GPT Image 2.5 variants and otherwise use GPT Image 2.
+              model: resolveSavedModel(data.provider, data.modelVariant),
             });
 
             addImage(savedImage);

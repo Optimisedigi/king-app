@@ -2,7 +2,11 @@ import { getImagesJsonPath } from './paths';
 import { readJson, writeJsonAtomic, withJsonLock } from './atomicJson';
 
 /** Mirror of `ImageModel` in `src/renderer/src/stores/modelStore.ts`. */
-export type ImageModel = 'nano_banana_pro' | 'gpt_image_2';
+export type ImageModel =
+  | 'nano_banana_pro'
+  | 'gpt_image_2'
+  | 'gpt_image_25_flare'
+  | 'gpt_image_25_sunburst';
 
 export interface StoredImage {
   id: string;
@@ -13,7 +17,7 @@ export interface StoredImage {
   createdAt: string;
   filename: string;
   /**
-   * Which fal model produced this image. Optional because records saved
+   * Which model produced this image. Optional because records saved
    * before this field was introduced won't have it; the renderer falls
    * back to a sensible default for legacy entries.
    */

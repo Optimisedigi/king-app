@@ -1,15 +1,18 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
 
+/** Mirror of `ImageModel` in `src/renderer/src/stores/modelStore.ts`. */
+type ImageModelId =
+  | 'nano_banana_pro'
+  | 'gpt_image_2'
+  | 'gpt_image_25_flare'
+  | 'gpt_image_25_sunburst';
+
 const api = {
   images: {
     list: (cursor?: string, limit?: number) => ipcRenderer.invoke('images:list', cursor, limit),
-    save: (data: {
-      url: string;
-      prompt: string;
-      aspectRatio: string;
-      model?: 'nano_banana_pro' | 'gpt_image_2';
-    }) => ipcRenderer.invoke('images:save', data),
+    save: (data: { url: string; prompt: string; aspectRatio: string; model?: ImageModelId }) =>
+      ipcRenderer.invoke('images:save', data),
     delete: (id: string) => ipcRenderer.invoke('images:delete', id),
   },
   generate: {
@@ -20,7 +23,7 @@ const api = {
       outputFormat: string;
       imageUrls: string[];
       provider?: 'openai-api' | 'openai-oauth' | 'fal';
-      modelVariant?: 'nano_banana_pro' | 'gpt_image_2';
+      modelVariant?: ImageModelId;
     }) => ipcRenderer.invoke('generate:image', data),
   },
   files: {

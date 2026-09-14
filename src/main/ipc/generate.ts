@@ -9,6 +9,13 @@ import { secureHandle } from './validateSender';
 
 export type ImageProvider = 'openai-api' | 'openai-oauth' | 'fal';
 
+/** Mirror of `ImageModel` in `src/renderer/src/stores/modelStore.ts`. */
+export type ImageModelVariant =
+  | 'nano_banana_pro'
+  | 'gpt_image_2'
+  | 'gpt_image_25_flare'
+  | 'gpt_image_25_sunburst';
+
 export interface GenerateImageInput {
   prompt: string;
   count?: number;
@@ -18,8 +25,12 @@ export interface GenerateImageInput {
   imageUrls?: string[];
   /** Which generation backend to use. Defaults to 'openai-api'. */
   provider?: ImageProvider;
-  /** fal.ai model variant — only used when provider is 'fal'. */
-  modelVariant?: 'nano_banana_pro' | 'gpt_image_2';
+  /**
+   * Which image model to use. The fal path picks between all four variants;
+   * both OpenAI paths honour the GPT Image 2.5 variants and otherwise fall
+   * back to GPT Image 2.
+   */
+  modelVariant?: ImageModelVariant;
 }
 
 export interface GenerateImageResult {
@@ -33,6 +44,20 @@ export interface GenerateImageResult {
 // ---------------------------------------------------------------------------
 
 const IMAGE_MODEL = 'gpt-image-2';
+const OPENAI_MODEL_IDS: Record<string, string> = {
+  gpt_image_25_flare: 'gpt-image-2.5-flare',
+  gpt_image_25_sunburst: 'gpt-image-2.5-sunburst',
+};
+
+/**
+ * The OpenAI image model id a variant maps to, or undefined when the variant
+ * has no OpenAI equivalent (e.g. Nano Banana Pro). Callers either fall back
+ * to `IMAGE_MODEL` or omit the field and let the backend default apply.
+ */
+function optionalOpenAIModel(variant: string | undefined): string | undefined {
+  return variant ? OPENAI_MODEL_IDS[variant] : undefined;
+}
+
 const MAX_PROMPT_LENGTH = 32_000;
 const MAX_REFERENCE_IMAGES = 8;
 const MAX_REFERENCE_BYTES = 30 * 1024 * 1024;
@@ -148,6 +173,13 @@ async function referenceToDataUrl(source: string, index: number): Promise<string
 // Input normalisation
 // ---------------------------------------------------------------------------
 
+const MODEL_VARIANTS = new Set<string>([
+  'nano_banana_pro',
+  'gpt_image_2',
+  'gpt_image_25_flare',
+  'gpt_image_25_sunburst',
+]);
+
 const IMAGE_SIZES: Record<string, string> = {
   '1:1': '1024x1024',
   '2:3': '1024x1536',
@@ -201,6 +233,11 @@ function normaliseInput(
   if (!['openai-api', 'openai-oauth', 'fal'].includes(provider))
     throw new Error('Unsupported image provider.');
 
+  const modelVariant = data.modelVariant;
+  if (modelVariant !== undefined && !MODEL_VARIANTS.has(modelVariant)) {
+    throw new Error('Unsupported image model.');
+  }
+
   return {
     prompt,
     count,
@@ -209,7 +246,7 @@ function normaliseInput(
     outputFormat,
     imageUrls,
     provider,
-    modelVariant: data.modelVariant,
+    modelVariant,
   };
 }
 
@@ -236,7 +273,7 @@ async function generateViaApiKey(
 
   const openai = new OpenAI({ apiKey });
   const common = {
-    model: IMAGE_MODEL,
+    model: optionalOpenAIModel(data.modelVariant) ?? IMAGE_MODEL,
     prompt: data.prompt,
     n: data.count,
     size: data.aspectRatio === 'auto' ? ('auto' as const) : IMAGE_SIZES[data.aspectRatio],
@@ -273,6 +310,14 @@ async function generateViaOAuth(
   const referenceImageUrls = await Promise.all(data.imageUrls.map(referenceToDataUrl));
   const resultUrls: string[] = [];
 
+  // The hosted image_generation tool accepts an explicit image model. Only
+  // send one for the GPT Image 2.5 variants; otherwise let the backend pick
+  // its default, as it did before model selection existed.
+  const toolModel = optionalOpenAIModel(data.modelVariant);
+  const imageTool = toolModel
+    ? { type: 'image_generation', model: toolModel }
+    : { type: 'image_generation' };
+
   for (let i = 0; i < data.count; i++) {
     if (data.count > 1) onProgress?.(`Generating ${i + 1}/${data.count}…`);
 
@@ -289,7 +334,7 @@ async function generateViaOAuth(
       },
       body: JSON.stringify({
         model: 'gpt-5.4',
-        tools: [{ type: 'image_generation' }],
+        tools: [imageTool],
         input: [
           {
             role: 'user',
@@ -376,6 +421,12 @@ const NANO_BANANA_PRO_MODEL = 'fal-ai/nano-banana-pro';
 const NANO_BANANA_PRO_EDIT_MODEL = 'fal-ai/nano-banana-pro/edit';
 const GPT_IMAGE_2_MODEL = 'openai/gpt-image-2';
 const GPT_IMAGE_2_EDIT_MODEL = 'openai/gpt-image-2/edit';
+// GPT Image 2.5 ships on fal as four variant endpoints under a shared
+// `openai/gpt-image-2.5/<variant>/` prefix — there is no bare 2.5 endpoint.
+const GPT_IMAGE_25_FLARE_MODEL = 'openai/gpt-image-2.5/flare/text-to-image';
+const GPT_IMAGE_25_FLARE_EDIT_MODEL = 'openai/gpt-image-2.5/flare/edit';
+const GPT_IMAGE_25_SUNBURST_MODEL = 'openai/gpt-image-2.5/sunburst/text-to-image';
+const GPT_IMAGE_25_SUNBURST_EDIT_MODEL = 'openai/gpt-image-2.5/sunburst/edit';
 
 const FAL_MISSING_KEY_MESSAGE =
   "Your image generator isn't connected yet. Open the APIs page and add your fal.ai key to get started.";
@@ -426,10 +477,21 @@ function isAuthFailure(status: number | undefined, message: string): boolean {
 }
 
 function selectFalModel(variant: string, hasReferenceImages: boolean): string {
-  if (variant === 'gpt_image_2') {
-    return hasReferenceImages ? GPT_IMAGE_2_EDIT_MODEL : GPT_IMAGE_2_MODEL;
+  switch (variant) {
+    case 'gpt_image_2':
+      return hasReferenceImages ? GPT_IMAGE_2_EDIT_MODEL : GPT_IMAGE_2_MODEL;
+    case 'gpt_image_25_flare':
+      return hasReferenceImages ? GPT_IMAGE_25_FLARE_EDIT_MODEL : GPT_IMAGE_25_FLARE_MODEL;
+    case 'gpt_image_25_sunburst':
+      return hasReferenceImages ? GPT_IMAGE_25_SUNBURST_EDIT_MODEL : GPT_IMAGE_25_SUNBURST_MODEL;
+    default:
+      return hasReferenceImages ? NANO_BANANA_PRO_EDIT_MODEL : NANO_BANANA_PRO_MODEL;
   }
-  return hasReferenceImages ? NANO_BANANA_PRO_EDIT_MODEL : NANO_BANANA_PRO_MODEL;
+}
+
+/** GPT Image family variants share the same fal input shape. */
+function isGptImageVariant(variant: string): boolean {
+  return variant.startsWith('gpt_image_');
 }
 
 function mapAspectToGptImageSize(aspectRatio: string): string {
@@ -490,11 +552,11 @@ async function generateViaFal(
     .filter((u) => u.startsWith('data:') || u.startsWith('http'));
 
   const hasReferenceImages = resolvedUrls.length > 0;
-  const variant = data.modelVariant === 'gpt_image_2' ? 'gpt_image_2' : 'nano_banana_pro';
+  const variant = data.modelVariant ?? 'nano_banana_pro';
   const model = selectFalModel(variant, hasReferenceImages);
 
   let input: Record<string, unknown>;
-  if (variant === 'gpt_image_2') {
+  if (isGptImageVariant(variant)) {
     input = {
       prompt: data.prompt,
       image_size: mapAspectToGptImageSize(data.aspectRatio),
