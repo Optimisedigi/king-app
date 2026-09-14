@@ -12,8 +12,7 @@ import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import { useImages } from '@/hooks';
 import { useGenerationStore } from '@/stores/generationStore';
 import { cleanIpcError } from '@/lib/ipcError';
-import { cropCloseUp } from '@/lib/cropImage';
-import { PRODUCT_ANGLES, CLOSE_UP_SOURCE_ANGLE_ID, CLOSE_UP_LABEL } from '@/lib/productAngles';
+import { CLOSE_UP_SOURCE_ANGLE_ID, CLOSE_UP_LABEL, type AngleShot } from '@/lib/productAngles';
 import type { ImageModelId } from '@/types/electron';
 
 /**
@@ -145,12 +144,13 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     referenceImages: string[];
     provider?: 'openai-api' | 'openai-oauth' | 'fal';
     modelVariant?: ImageModelId;
-    anglePrompts?: string[];
+    angleShots?: AngleShot[];
   }) => {
-    // An angle set supplies one prompt per shot; otherwise every image in the
-    // batch uses the same prompt.
-    const promptFor = (index: number) => data.anglePrompts?.[index] ?? data.prompt;
-    const isAngleSet = Boolean(data.anglePrompts?.length);
+    // An angle set supplies one shot per camera angle, each carrying its own
+    // prompt and angle id; otherwise every image in the batch shares a prompt.
+    const angleShots = data.angleShots;
+    const promptFor = (index: number) => angleShots?.[index]?.prompt ?? data.prompt;
+    const isAngleSet = Boolean(angleShots?.length);
 
     const generationIds: string[] = [];
     for (let i = 0; i < data.count; i++) {
@@ -191,10 +191,6 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
             continue;
           }
 
-          if (isAngleSet && PRODUCT_ANGLES[i]?.id === CLOSE_UP_SOURCE_ANGLE_ID) {
-            closeUpSourceUrl = result.resultUrls[0] ?? null;
-          }
-
           for (const url of result.resultUrls) {
             const savedImage = await window.api.images.save({
               url,
@@ -207,6 +203,12 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
 
             addImage(savedImage);
             successCount++;
+
+            // Crop the close-up from the saved copy of the angle it belongs
+            // to, matched by angle id rather than by position.
+            if (angleShots?.[i]?.angleId === CLOSE_UP_SOURCE_ANGLE_ID && !closeUpSourceUrl) {
+              closeUpSourceUrl = savedImage.url;
+            }
           }
 
           removeImageGeneration(generationId);
@@ -220,18 +222,23 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
       // pixel-identical rather than merely similar.
       if (cropGenerationId) {
         try {
-          const cropped = closeUpSourceUrl ? await cropCloseUp(closeUpSourceUrl) : null;
-          if (cropped) {
-            const savedImage = await window.api.images.save({
-              url: cropped,
-              prompt: `${CLOSE_UP_LABEL} — ${data.prompt}`,
-              aspectRatio: '1:1',
-              model: resolveSavedModel(data.provider, data.modelVariant),
-            });
-            addImage(savedImage);
-            successCount++;
-          } else if (closeUpSourceUrl) {
-            toast.error("Couldn't crop the close-up from the generated shot.");
+          if (!closeUpSourceUrl) {
+            // The shot it crops from failed, so there is nothing to crop.
+            toast.error("Skipped the close-up: the wider shot it crops from didn't generate.");
+          } else {
+            const cropped = await window.api.images.cropCloseUp(closeUpSourceUrl);
+            if (cropped.success && cropped.dataUrl) {
+              const savedImage = await window.api.images.save({
+                url: cropped.dataUrl,
+                prompt: `${CLOSE_UP_LABEL} — ${data.prompt}`,
+                aspectRatio: '1:1',
+                model: resolveSavedModel(data.provider, data.modelVariant),
+              });
+              addImage(savedImage);
+              successCount++;
+            } else {
+              toast.error("Couldn't crop the close-up from the generated shot.");
+            }
           }
         } catch (err) {
           toast.error(cleanIpcError(err, "Couldn't save the cropped close-up."));

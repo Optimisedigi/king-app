@@ -59,9 +59,27 @@ export const CONSISTENCY_CLAUSE =
   'framing described above. Do not restyle, redesign, garnish, add or remove anything.';
 
 /**
+ * One request in an angle set. Carrying the angle id alongside the prompt
+ * means the caller can tell which shot came back without relying on the two
+ * lists staying in the same order.
+ */
+export interface AngleShot {
+  angleId: string;
+  prompt: string;
+}
+
+/**
  * Build the full prompt for one angle: the user's creative direction, then the
  * camera move, then the consistency lock.
  */
 export function buildAnglePrompt(basePrompt: string, angle: ProductAngle): string {
   return `${basePrompt.trim()}\n\n${angle.instruction}\n\n${CONSISTENCY_CLAUSE}`;
+}
+
+/** Build the full ordered set of shots for one product photo. */
+export function buildAngleShots(basePrompt: string): AngleShot[] {
+  return PRODUCT_ANGLES.map((angle) => ({
+    angleId: angle.id,
+    prompt: buildAnglePrompt(basePrompt, angle),
+  }));
 }

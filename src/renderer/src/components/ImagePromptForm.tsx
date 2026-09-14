@@ -1,7 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import SelectDropdown from '@/components/ui/SelectDropdown';
-import { PRODUCT_ANGLES, ANGLE_SET_SIZE, buildAnglePrompt } from '@/lib/productAngles';
+import {
+  PRODUCT_ANGLES,
+  ANGLE_SET_SIZE,
+  buildAngleShots,
+  type AngleShot,
+} from '@/lib/productAngles';
 import {
   PlusIcon,
   MinusIcon,
@@ -48,11 +53,11 @@ interface ImagePromptFormProps {
     provider?: ImageProvider;
     modelVariant?: ImageModelId;
     /**
-     * One fully-built prompt per image, used by the angle set so each shot
-     * gets its own camera instruction. When present its length matches
-     * `count` and it takes precedence over `prompt` for generation.
+     * One entry per image in an angle set, each with its own camera prompt and
+     * the angle it came from. When present its length matches `count` and its
+     * prompts take precedence over `prompt`.
      */
-    anglePrompts?: string[];
+    angleShots?: AngleShot[];
   }) => void;
   initialPrompt?: string;
   recreateData?: { prompt: string } | null;
@@ -303,7 +308,7 @@ export default function ImagePromptForm({
         referenceImages: uploadedImageUrls,
         provider,
         modelVariant,
-        anglePrompts: PRODUCT_ANGLES.map((angle) => buildAnglePrompt(resolvedPrompt, angle)),
+        angleShots: buildAngleShots(resolvedPrompt),
       });
       return;
     }

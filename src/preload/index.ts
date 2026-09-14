@@ -13,6 +13,7 @@ const api = {
     list: (cursor?: string, limit?: number) => ipcRenderer.invoke('images:list', cursor, limit),
     save: (data: { url: string; prompt: string; aspectRatio: string; model?: ImageModelId }) =>
       ipcRenderer.invoke('images:save', data),
+    cropCloseUp: (localUrl: string) => ipcRenderer.invoke('images:cropCloseUp', localUrl),
     delete: (id: string) => ipcRenderer.invoke('images:delete', id),
   },
   generate: {

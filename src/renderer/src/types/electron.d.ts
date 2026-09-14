@@ -175,6 +175,11 @@ export interface ElectronAPI {
       aspectRatio: string;
       model?: ImageModelId;
     }) => Promise<GeneratedImageData>;
+    /**
+     * Crop a close-up from an already-saved image, given its `local-file://`
+     * URL. Returns a PNG data URL ready to pass back to `save`.
+     */
+    cropCloseUp: (localUrl: string) => Promise<{ success: boolean; dataUrl?: string }>;
     delete: (id: string) => Promise<{ success: boolean }>;
   };
   generate: {
