@@ -29,10 +29,19 @@ import {
   SUPPORTED_IMAGE_MIME_REGEX,
 } from '@/lib/constants/image-form';
 import { renderPrompt } from '@/lib/productTypes';
+import HelpTip from '@/components/ui/HelpTip';
+import SavedPromptsMenu from '@/components/ui/SavedPromptsMenu';
+import type { GenerationTarget } from '@/lib/generationJobs';
 import type { EntityData, ImageModelId } from '@/types/electron';
 import { useModelStore } from '@/stores/modelStore';
 
 type ImageProvider = 'openai-api' | 'openai-oauth' | 'fal';
+
+/** Entity-selector value meaning "run this across every saved product". */
+const ALL_PRODUCTS_VALUE = 'product:all';
+
+/** Above this many images, a batch asks for confirmation before spending. */
+const BATCH_CONFIRM_THRESHOLD = 12;
 
 interface ReferenceImage {
   id: string;
@@ -58,6 +67,11 @@ interface ImagePromptFormProps {
      * prompts take precedence over `prompt`.
      */
     angleShots?: AngleShot[];
+    /**
+     * One entry per product when running the same prompt across a batch.
+     * Each carries that product's own reference photos.
+     */
+    targets?: GenerationTarget[];
   }) => void;
   initialPrompt?: string;
   recreateData?: { prompt: string } | null;
@@ -137,12 +151,14 @@ export default function ImagePromptForm({
     };
   }, []);
 
-  // Build entity selector options
+  // Build entity selector options. `product:all` runs the same prompt over
+  // every saved product, each with its own reference photos.
   const entityOptions = [
     { value: 'none', label: 'Default' },
     ...(products.length > 0
       ? [
           { value: '_product_header', label: 'Products', disabled: true },
+          { value: ALL_PRODUCTS_VALUE, label: `All products (${products.length})` },
           ...products.map((p) => ({ value: `product:${p.id}`, label: p.name })),
         ]
       : []),
@@ -159,7 +175,9 @@ export default function ImagePromptForm({
     (value: string) => {
       setSelectedEntity(value);
 
-      if (value === 'none') {
+      // A batch run pulls each product's own photos at submit time, so there
+      // is no single set to preview here.
+      if (value === 'none' || value === ALL_PRODUCTS_VALUE) {
         setReferenceImages([]);
         return;
       }
@@ -284,17 +302,51 @@ export default function ImagePromptForm({
       .filter((img) => img.url)
       .map((img) => img.url as string);
 
+    // A batch run turns every saved product into its own target, carrying that
+    // product's reference photos.
+    const isBatch = selectedEntity === ALL_PRODUCTS_VALUE;
+
+    // A batch spans many product types, so there is no single one to
+    // substitute into the prompt.
     let selectedProductType: string | undefined;
-    if (selectedEntity.startsWith('product:')) {
+    if (!isBatch && selectedEntity.startsWith('product:')) {
       const id = selectedEntity.slice('product:'.length);
       selectedProductType = products.find((p) => p.id === id)?.productType;
     }
     const resolvedPrompt = renderPrompt(prompt, selectedProductType);
 
+    const batchTargets: GenerationTarget[] = isBatch
+      ? products
+          .filter((p) => p.referenceImages.length > 0)
+          .map((p) => ({
+            key: p.id,
+            label: p.name,
+            referenceImages: p.referenceImages.slice(0, MAX_REFERENCE_IMAGES),
+          }))
+      : [];
+
+    if (isBatch && batchTargets.length === 0) {
+      toast.error('None of your products have reference photos yet.');
+      return;
+    }
+
+    // A batch multiplies cost by the number of products, so confirm before
+    // firing off a large run the user can't easily cancel.
+    if (isBatch) {
+      const perProduct = angleSet ? ANGLE_SET_SIZE : imageCount;
+      const total = batchTargets.length * perProduct;
+      if (total > BATCH_CONFIRM_THRESHOLD) {
+        const confirmed = window.confirm(
+          `This will generate ${total} images (${perProduct} for each of ${batchTargets.length} products) and bill your provider for every one. Continue?`,
+        );
+        if (!confirmed) return;
+      }
+    }
+
     // An angle set is one request per angle, all from the same reference
     // photo, so `count` is driven by the angle list rather than the stepper.
     if (angleSet) {
-      if (!uploadedImageUrls.length) {
+      if (!isBatch && !uploadedImageUrls.length) {
         toast.error('Add a photo of the product first so every angle matches it.');
         return;
       }
@@ -309,6 +361,7 @@ export default function ImagePromptForm({
         provider,
         modelVariant,
         angleShots: buildAngleShots(resolvedPrompt),
+        ...(isBatch ? { targets: batchTargets } : {}),
       });
       return;
     }
@@ -322,6 +375,7 @@ export default function ImagePromptForm({
       referenceImages: uploadedImageUrls,
       provider,
       modelVariant,
+      ...(isBatch ? { targets: batchTargets } : {}),
     });
   };
 
@@ -425,6 +479,18 @@ export default function ImagePromptForm({
 
           {/* Controls row */}
           <div className="flex h-9 items-center gap-2">
+            <SavedPromptsMenu
+              currentPrompt={prompt}
+              onUsePrompt={(saved) => {
+                setPrompt(saved);
+                autoResizeTextarea();
+              }}
+            />
+            <HelpTip
+              label="About saved prompts"
+              text="Save wording you like, then load it again later. Pair a saved prompt with 'All products' to run the identical prompt across your whole catalogue."
+            />
+
             {availableProviders.length > 1 && (
               <SelectDropdown
                 options={availableProviders.map((p) => ({
@@ -448,6 +514,10 @@ export default function ImagePromptForm({
               onChange={handleEntityChange}
               direction="up"
             />
+            <HelpTip
+              label="About the product selector"
+              text="Pick a saved product to use its reference photos automatically. Choose 'All products' to run this same prompt once for every product you've saved."
+            />
 
             {/* Angle set — one shot per camera angle, all from the same photo. */}
             <button
@@ -463,6 +533,10 @@ export default function ImagePromptForm({
             >
               {ANGLE_SET_SIZE} angles
             </button>
+            <HelpTip
+              label="About the angle set"
+              text={`Turns one product photo into ${ANGLE_SET_SIZE} matching shots: ${PRODUCT_ANGLES.map((a) => a.label).join(' and ')}, plus a close-up cropped straight out of the 45° shot so the product is identical. Needs a reference photo.`}
+            />
 
             {/* Image count selector — an angle set fixes its own count. */}
             <div

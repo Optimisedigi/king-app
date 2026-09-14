@@ -13,6 +13,12 @@ import { useImages } from '@/hooks';
 import { useGenerationStore } from '@/stores/generationStore';
 import { cleanIpcError } from '@/lib/ipcError';
 import { CLOSE_UP_SOURCE_ANGLE_ID, CLOSE_UP_LABEL, type AngleShot } from '@/lib/productAngles';
+import {
+  buildGenerationJobs,
+  defaultTarget,
+  labelledPrompt,
+  type GenerationTarget,
+} from '@/lib/generationJobs';
 import type { ImageModelId } from '@/types/electron';
 
 /**
@@ -145,105 +151,123 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     provider?: 'openai-api' | 'openai-oauth' | 'fal';
     modelVariant?: ImageModelId;
     angleShots?: AngleShot[];
+    /** One entry per product in a batch run; omitted for a single run. */
+    targets?: GenerationTarget[];
   }) => {
-    // An angle set supplies one shot per camera angle, each carrying its own
-    // prompt and angle id; otherwise every image in the batch shares a prompt.
     const angleShots = data.angleShots;
-    const promptFor = (index: number) => angleShots?.[index]?.prompt ?? data.prompt;
     const isAngleSet = Boolean(angleShots?.length);
+    const targets = data.targets?.length ? data.targets : [defaultTarget(data.referenceImages)];
 
-    const generationIds: string[] = [];
-    for (let i = 0; i < data.count; i++) {
-      const id = `img-${Date.now()}-${i}`;
-      generationIds.push(id);
-      addImageGeneration(id, promptFor(i));
+    const jobs = buildGenerationJobs({
+      basePrompt: data.prompt,
+      targets,
+      count: data.count,
+      ...(angleShots ? { angleShots } : {}),
+    });
+    for (const job of jobs) {
+      addImageGeneration(job.id, labelledPrompt(job.prompt, job.targetLabel));
     }
 
-    // Placeholder for the close-up, which is cropped once the shot it comes
-    // from has been generated.
-    const cropGenerationId = isAngleSet ? `img-${Date.now()}-crop` : null;
-    if (cropGenerationId) addImageGeneration(cropGenerationId, CLOSE_UP_LABEL);
+    // Each product in an angle-set run gets its own close-up, cropped once the
+    // shot it comes from has been generated.
+    const cropJobs = isAngleSet
+      ? targets.map((target) => ({
+          id: `crop-${Date.now()}-${target.key}`,
+          targetKey: target.key,
+          targetLabel: target.label,
+        }))
+      : [];
+    for (const crop of cropJobs) {
+      addImageGeneration(crop.id, labelledPrompt(CLOSE_UP_LABEL, crop.targetLabel));
+    }
+
+    const allPlaceholderIds = [...jobs.map((j) => j.id), ...cropJobs.map((c) => c.id)];
 
     const generateImages = async () => {
       let successCount = 0;
 
-      // Source for the cropped close-up, captured from the angle it belongs to.
-      let closeUpSourceUrl: string | null = null;
+      // Saved image each product's close-up is cropped from, keyed by product.
+      const closeUpSources = new Map<string, string>();
+      const model = resolveSavedModel(data.provider, data.modelVariant);
 
-      for (let i = 0; i < data.count; i++) {
-        const generationId = generationIds[i];
-        if (!generationId) continue;
-        const anglePrompt = promptFor(i);
+      for (const job of jobs) {
+        const savedPrompt = labelledPrompt(job.prompt, job.targetLabel);
         try {
           const result = await window.api.generate.image({
-            prompt: anglePrompt,
+            prompt: job.prompt,
             aspectRatio: data.aspectRatio,
             resolution: data.resolution,
             outputFormat: data.outputFormat,
-            imageUrls: data.referenceImages,
+            imageUrls: job.referenceImages,
             provider: data.provider,
             modelVariant: data.modelVariant,
           });
 
           if (!result.success || !result.resultUrls?.length) {
             toast.error(result.error ?? "Couldn't generate that image. Please try again.");
-            removeImageGeneration(generationId);
+            removeImageGeneration(job.id);
             continue;
           }
 
           for (const url of result.resultUrls) {
             const savedImage = await window.api.images.save({
               url,
-              prompt: anglePrompt,
+              prompt: savedPrompt,
               aspectRatio: data.aspectRatio,
               // The fal path honours every variant; the OpenAI paths honour
               // the GPT Image 2.5 variants and otherwise use GPT Image 2.
-              model: resolveSavedModel(data.provider, data.modelVariant),
+              model,
             });
 
             addImage(savedImage);
             successCount++;
 
-            // Crop the close-up from the saved copy of the angle it belongs
-            // to, matched by angle id rather than by position.
-            if (angleShots?.[i]?.angleId === CLOSE_UP_SOURCE_ANGLE_ID && !closeUpSourceUrl) {
-              closeUpSourceUrl = savedImage.url;
+            // Crop this product's close-up from the saved copy of the angle it
+            // belongs to, matched by angle id rather than by position.
+            if (job.angleId === CLOSE_UP_SOURCE_ANGLE_ID && !closeUpSources.has(job.targetKey)) {
+              closeUpSources.set(job.targetKey, savedImage.url);
             }
           }
 
-          removeImageGeneration(generationId);
+          removeImageGeneration(job.id);
         } catch (err) {
           toast.error(cleanIpcError(err, 'Something went wrong. Please try again.'));
-          removeImageGeneration(generationId);
+          removeImageGeneration(job.id);
         }
       }
 
       // The close-up is a crop of a generated shot, so the product in it is
       // pixel-identical rather than merely similar.
-      if (cropGenerationId) {
+      for (const crop of cropJobs) {
+        const sourceUrl = closeUpSources.get(crop.targetKey);
         try {
-          if (!closeUpSourceUrl) {
-            // The shot it crops from failed, so there is nothing to crop.
-            toast.error("Skipped the close-up: the wider shot it crops from didn't generate.");
+          if (!sourceUrl) {
+            toast.error(
+              labelledPrompt(
+                "Skipped the close-up: the wider shot it crops from didn't generate.",
+                crop.targetLabel,
+              ),
+            );
+            continue;
+          }
+
+          const cropped = await window.api.images.cropCloseUp(sourceUrl);
+          if (cropped.success && cropped.dataUrl) {
+            const savedImage = await window.api.images.save({
+              url: cropped.dataUrl,
+              prompt: labelledPrompt(`${CLOSE_UP_LABEL} — ${data.prompt}`, crop.targetLabel),
+              aspectRatio: '1:1',
+              model,
+            });
+            addImage(savedImage);
+            successCount++;
           } else {
-            const cropped = await window.api.images.cropCloseUp(closeUpSourceUrl);
-            if (cropped.success && cropped.dataUrl) {
-              const savedImage = await window.api.images.save({
-                url: cropped.dataUrl,
-                prompt: `${CLOSE_UP_LABEL} — ${data.prompt}`,
-                aspectRatio: '1:1',
-                model: resolveSavedModel(data.provider, data.modelVariant),
-              });
-              addImage(savedImage);
-              successCount++;
-            } else {
-              toast.error("Couldn't crop the close-up from the generated shot.");
-            }
+            toast.error("Couldn't crop the close-up from the generated shot.");
           }
         } catch (err) {
           toast.error(cleanIpcError(err, "Couldn't save the cropped close-up."));
         } finally {
-          removeImageGeneration(cropGenerationId);
+          removeImageGeneration(crop.id);
         }
       }
 
@@ -255,7 +279,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     generateImages().catch((error) => {
       console.error('Unhandled error in image generation:', error);
       toast.error('Something went wrong. Please try again.');
-      generationIds.forEach((id) => removeImageGeneration(id));
+      allPlaceholderIds.forEach((id) => removeImageGeneration(id));
     });
   };
 

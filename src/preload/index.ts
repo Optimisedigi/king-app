@@ -182,6 +182,14 @@ const api = {
     delete: (entityType: string, id: string) =>
       ipcRenderer.invoke('entities:delete', entityType, id),
   },
+  savedPrompts: {
+    list: () => ipcRenderer.invoke('savedPrompts:list'),
+    create: (data: { title: string; prompt: string }) =>
+      ipcRenderer.invoke('savedPrompts:create', data),
+    update: (id: string, data: { title?: string; prompt?: string }) =>
+      ipcRenderer.invoke('savedPrompts:update', id, data),
+    delete: (id: string) => ipcRenderer.invoke('savedPrompts:delete', id),
+  },
 };
 
 contextBridge.exposeInMainWorld('api', api);

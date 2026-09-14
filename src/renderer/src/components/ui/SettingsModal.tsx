@@ -11,6 +11,26 @@ const MODEL_OPTIONS: { value: ImageModel; label: string }[] = [
   { value: 'gpt_image_25_sunburst', label: 'GPT Image 2.5 Sunburst' },
 ];
 
+/** Short explanations of the controls that aren't self-evident. */
+const HOW_TO_ENTRIES = [
+  {
+    title: 'Reference photos',
+    body: 'Upload up to 8 photos of the real product. The model copies what it sees, so a clean, well-lit photo matters more than a long prompt. Oversized photos are shrunk automatically.',
+  },
+  {
+    title: 'Products',
+    body: 'Save a product once with its photos, then pick it from the dropdown to reuse them. Choose "All products" to run the same prompt across your whole catalogue in one go.',
+  },
+  {
+    title: 'Prompts',
+    body: 'Save wording that works, then load it back later. A saved prompt plus "All products" gives every product identical treatment.',
+  },
+  {
+    title: 'Angle set',
+    body: 'Turns one product photo into matching shots from different camera positions. The close-up is cropped out of the 45\u00b0 shot, so the product is pixel-identical rather than redrawn.',
+  },
+];
+
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -204,6 +224,30 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               fullWidth
             />
           </div>
+          <p className="mt-2 text-xs leading-snug text-[var(--base-color-brand--umber)]">
+            Flare is the faster, cheaper choice for everyday shots. Sunburst is slower but holds a
+            product&apos;s shape and label steadier — use it for angle sets and campaign images.
+          </p>
+        </section>
+
+        {/* How-to guide, so the less obvious controls are explained in-app. */}
+        <section className="mt-4 rounded-2xl border border-[var(--base-color-brand--umber)]/30 bg-[var(--base-color-brand--champagne)]/60 px-4 py-3">
+          <p
+            className="text-sm font-semibold text-[var(--base-color-brand--bean)]"
+            style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
+          >
+            How to use it
+          </p>
+          <dl className="mt-2 space-y-2 text-xs leading-snug text-[var(--base-color-brand--umber)]">
+            {HOW_TO_ENTRIES.map((entry) => (
+              <div key={entry.title}>
+                <dt className="font-semibold text-[var(--base-color-brand--bean)]">
+                  {entry.title}
+                </dt>
+                <dd>{entry.body}</dd>
+              </div>
+            ))}
+          </dl>
         </section>
 
         {/* Updates section */}

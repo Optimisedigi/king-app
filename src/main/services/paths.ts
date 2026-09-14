@@ -39,6 +39,10 @@ export function getAdReferencesJsonPath(): string {
   return join(getDataDir(), 'ad-references.json');
 }
 
+export function getSavedPromptsJsonPath(): string {
+  return join(getDataDir(), 'saved-prompts.json');
+}
+
 export function getEntityImagesDir(entityType: string): string {
   const dir = join(getImagesDir(), 'entities', entityType);
   ensureDir(dir);

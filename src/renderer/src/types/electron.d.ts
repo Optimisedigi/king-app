@@ -25,6 +25,15 @@ export interface EntityData {
   productType?: string;
 }
 
+/** A prompt the user saved to reuse across products. */
+export interface SavedPromptData {
+  id: string;
+  title: string;
+  prompt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CustomAdReferenceData {
   id: string;
   filename: string;
@@ -366,6 +375,16 @@ export interface ElectronAPI {
       },
     ) => Promise<EntityData>;
     delete: (entityType: string, id: string) => Promise<{ success: boolean }>;
+  };
+  /** The user's own reusable prompts, saved to run across many products. */
+  savedPrompts: {
+    list: () => Promise<SavedPromptData[]>;
+    create: (data: { title: string; prompt: string }) => Promise<SavedPromptData>;
+    update: (
+      id: string,
+      data: { title?: string; prompt?: string },
+    ) => Promise<SavedPromptData | null>;
+    delete: (id: string) => Promise<{ success: boolean }>;
   };
 }
 
