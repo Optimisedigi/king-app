@@ -10,10 +10,12 @@
  */
 
 import { app, BrowserWindow } from 'electron';
-import pkg from 'electron-updater';
+// Named import, not a default one: electron-updater's CommonJS output sets
+// `__esModule` but exports no `default`, so `import pkg from 'electron-updater'`
+// bundles down to an undefined `.default` and crashes the main process on
+// launch. `autoUpdater` is a real named export.
+import { autoUpdater } from 'electron-updater';
 import log from 'electron-log/main';
-
-const { autoUpdater } = pkg;
 
 export type UpdaterStage =
   | 'idle'

@@ -302,6 +302,14 @@ async function generateViaApiKey(
 // Path 2: OpenAI OAuth (Codex endpoint with image_generation tool)
 // ---------------------------------------------------------------------------
 
+/**
+ * The text model that hosts the image_generation tool on the Codex endpoint.
+ * This is not the image model — that is set on the tool itself. `gpt-5.4`
+ * retired from Codex with ChatGPT sign-in on 2026-08-31 and now returns a 400,
+ * so ChatGPT-account sign-in must use its replacement.
+ */
+const CODEX_HOST_MODEL = 'gpt-5.6-terra';
+
 async function generateViaOAuth(
   data: ReturnType<typeof normaliseInput>,
   onProgress?: (message: string) => void,
@@ -333,7 +341,7 @@ async function generateViaOAuth(
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
-        model: 'gpt-5.4',
+        model: CODEX_HOST_MODEL,
         tools: [imageTool],
         input: [
           {
