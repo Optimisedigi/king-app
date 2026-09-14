@@ -342,6 +342,9 @@ async function generateViaOAuth(
       },
       body: JSON.stringify({
         model: CODEX_HOST_MODEL,
+        // The Codex endpoint refuses to persist responses for ChatGPT-account
+        // sign-in and rejects the request unless this is sent explicitly.
+        store: false,
         tools: [imageTool],
         input: [
           {
