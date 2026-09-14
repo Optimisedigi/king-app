@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import SelectDropdown from '@/components/ui/SelectDropdown';
+import { PRODUCT_ANGLES, ANGLE_SET_SIZE, buildAnglePrompt } from '@/lib/productAngles';
 import {
   PlusIcon,
   MinusIcon,
@@ -46,6 +47,12 @@ interface ImagePromptFormProps {
     referenceImages: string[];
     provider?: ImageProvider;
     modelVariant?: ImageModelId;
+    /**
+     * One fully-built prompt per image, used by the angle set so each shot
+     * gets its own camera instruction. When present its length matches
+     * `count` and it takes precedence over `prompt` for generation.
+     */
+    anglePrompts?: string[];
   }) => void;
   initialPrompt?: string;
   recreateData?: { prompt: string } | null;
@@ -61,6 +68,7 @@ export default function ImagePromptForm({
   const [prompt, setPrompt] = useState(initialPrompt);
   const [selectedEntity, setSelectedEntity] = useState('none');
   const [imageCount, setImageCount] = useState(1);
+  const [angleSet, setAngleSet] = useState(false);
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [resolution, setResolution] = useState('high');
   const [outputFormat, setOutputFormat] = useState('png');
@@ -278,6 +286,28 @@ export default function ImagePromptForm({
     }
     const resolvedPrompt = renderPrompt(prompt, selectedProductType);
 
+    // An angle set is one request per angle, all from the same reference
+    // photo, so `count` is driven by the angle list rather than the stepper.
+    if (angleSet) {
+      if (!uploadedImageUrls.length) {
+        toast.error('Add a photo of the product first so every angle matches it.');
+        return;
+      }
+
+      onSubmit?.({
+        prompt: resolvedPrompt,
+        count: PRODUCT_ANGLES.length,
+        aspectRatio,
+        resolution,
+        outputFormat,
+        referenceImages: uploadedImageUrls,
+        provider,
+        modelVariant,
+        anglePrompts: PRODUCT_ANGLES.map((angle) => buildAnglePrompt(resolvedPrompt, angle)),
+      });
+      return;
+    }
+
     onSubmit?.({
       prompt: resolvedPrompt,
       count: imageCount,
@@ -414,24 +444,43 @@ export default function ImagePromptForm({
               direction="up"
             />
 
-            {/* Image count selector */}
-            <div className="flex h-10 items-center gap-1 rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] px-3">
+            {/* Angle set — one shot per camera angle, all from the same photo. */}
+            <button
+              type="button"
+              onClick={() => setAngleSet((prev) => !prev)}
+              aria-pressed={angleSet}
+              title={`Generate ${ANGLE_SET_SIZE} shots of the same product: ${PRODUCT_ANGLES.map((a) => a.label).join(', ')}, plus a close-up cropped from the 45° shot`}
+              className={`flex h-10 shrink-0 items-center rounded-full border px-3 text-sm font-semibold transition-colors ${
+                angleSet
+                  ? 'border-[var(--base-color-brand--bean)] bg-[var(--base-color-brand--bean)] text-[var(--base-color-brand--shell)]'
+                  : 'border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] text-[var(--base-color-brand--bean)] hover:text-[var(--base-color-brand--cinamon)]'
+              }`}
+            >
+              {ANGLE_SET_SIZE} angles
+            </button>
+
+            {/* Image count selector — an angle set fixes its own count. */}
+            <div
+              className={`flex h-10 items-center gap-1 rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] px-3 ${
+                angleSet ? 'pointer-events-none opacity-40' : ''
+              }`}
+            >
               <button
                 type="button"
                 onClick={decrementCount}
-                disabled={imageCount <= 1}
+                disabled={angleSet || imageCount <= 1}
                 className="text-[var(--base-color-brand--bean)] transition-colors hover:text-[var(--base-color-brand--cinamon)] disabled:opacity-40 disabled:hover:text-[var(--base-color-brand--bean)]"
               >
                 <MinusIcon />
               </button>
               <span className="w-8 text-center text-sm font-semibold text-[var(--base-color-brand--bean)]">
-                {imageCount}
+                {angleSet ? ANGLE_SET_SIZE : imageCount}
                 <span className="text-[var(--base-color-brand--umber)]">/{maxImages}</span>
               </span>
               <button
                 type="button"
                 onClick={incrementCount}
-                disabled={imageCount >= maxImages}
+                disabled={angleSet || imageCount >= maxImages}
                 className="text-[var(--base-color-brand--bean)] transition-colors hover:text-[var(--base-color-brand--cinamon)] disabled:opacity-40 disabled:hover:text-[var(--base-color-brand--bean)]"
               >
                 <PlusIcon />

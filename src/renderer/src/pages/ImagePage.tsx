@@ -12,6 +12,8 @@ import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import { useImages } from '@/hooks';
 import { useGenerationStore } from '@/stores/generationStore';
 import { cleanIpcError } from '@/lib/ipcError';
+import { cropCloseUp } from '@/lib/cropImage';
+import { PRODUCT_ANGLES, CLOSE_UP_SOURCE_ANGLE_ID, CLOSE_UP_LABEL } from '@/lib/productAngles';
 import type { ImageModelId } from '@/types/electron';
 
 /**
@@ -143,23 +145,38 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     referenceImages: string[];
     provider?: 'openai-api' | 'openai-oauth' | 'fal';
     modelVariant?: ImageModelId;
+    anglePrompts?: string[];
   }) => {
+    // An angle set supplies one prompt per shot; otherwise every image in the
+    // batch uses the same prompt.
+    const promptFor = (index: number) => data.anglePrompts?.[index] ?? data.prompt;
+    const isAngleSet = Boolean(data.anglePrompts?.length);
+
     const generationIds: string[] = [];
     for (let i = 0; i < data.count; i++) {
       const id = `img-${Date.now()}-${i}`;
       generationIds.push(id);
-      addImageGeneration(id, data.prompt);
+      addImageGeneration(id, promptFor(i));
     }
+
+    // Placeholder for the close-up, which is cropped once the shot it comes
+    // from has been generated.
+    const cropGenerationId = isAngleSet ? `img-${Date.now()}-crop` : null;
+    if (cropGenerationId) addImageGeneration(cropGenerationId, CLOSE_UP_LABEL);
 
     const generateImages = async () => {
       let successCount = 0;
 
+      // Source for the cropped close-up, captured from the angle it belongs to.
+      let closeUpSourceUrl: string | null = null;
+
       for (let i = 0; i < data.count; i++) {
         const generationId = generationIds[i];
         if (!generationId) continue;
+        const anglePrompt = promptFor(i);
         try {
           const result = await window.api.generate.image({
-            prompt: data.prompt,
+            prompt: anglePrompt,
             aspectRatio: data.aspectRatio,
             resolution: data.resolution,
             outputFormat: data.outputFormat,
@@ -174,10 +191,14 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
             continue;
           }
 
+          if (isAngleSet && PRODUCT_ANGLES[i]?.id === CLOSE_UP_SOURCE_ANGLE_ID) {
+            closeUpSourceUrl = result.resultUrls[0] ?? null;
+          }
+
           for (const url of result.resultUrls) {
             const savedImage = await window.api.images.save({
               url,
-              prompt: data.prompt,
+              prompt: anglePrompt,
               aspectRatio: data.aspectRatio,
               // The fal path honours every variant; the OpenAI paths honour
               // the GPT Image 2.5 variants and otherwise use GPT Image 2.
@@ -192,6 +213,30 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
         } catch (err) {
           toast.error(cleanIpcError(err, 'Something went wrong. Please try again.'));
           removeImageGeneration(generationId);
+        }
+      }
+
+      // The close-up is a crop of a generated shot, so the product in it is
+      // pixel-identical rather than merely similar.
+      if (cropGenerationId) {
+        try {
+          const cropped = closeUpSourceUrl ? await cropCloseUp(closeUpSourceUrl) : null;
+          if (cropped) {
+            const savedImage = await window.api.images.save({
+              url: cropped,
+              prompt: `${CLOSE_UP_LABEL} — ${data.prompt}`,
+              aspectRatio: '1:1',
+              model: resolveSavedModel(data.provider, data.modelVariant),
+            });
+            addImage(savedImage);
+            successCount++;
+          } else if (closeUpSourceUrl) {
+            toast.error("Couldn't crop the close-up from the generated shot.");
+          }
+        } catch (err) {
+          toast.error(cleanIpcError(err, "Couldn't save the cropped close-up."));
+        } finally {
+          removeImageGeneration(cropGenerationId);
         }
       }
 
