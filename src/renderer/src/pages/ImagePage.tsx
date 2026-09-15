@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
-import { CloseIcon, DeleteIcon } from '@/components/icons';
+import { CloseIcon, DeleteIcon, DownloadIcon } from '@/components/icons';
 import ImagePromptForm from '@/components/ImagePromptForm';
 import {
   ImageEmptyState,
@@ -79,6 +79,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
   } = useImages();
 
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const selectedCount = selectedImages.size;
 
   const clearSelection = useCallback(() => setSelectedImages(new Set()), []);
@@ -87,6 +88,47 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     if (selectedCount === 0) return;
     setBatchDeleteOpen(true);
   }, [selectedCount]);
+
+  /**
+   * Save every selected image into one folder, picked once. Names come from
+   * each image's prompt, which already carries the product name and shot for
+   * anything produced by a batch or angle-set run.
+   */
+  const handleExportSelected = useCallback(async () => {
+    if (selectedCount === 0 || isExporting) return;
+
+    const items = generatedImages
+      .filter((image) => selectedImages.has(image.id))
+      .map((image) => ({
+        url: image.url,
+        name: image.prompt,
+        // The stored URL ends in the saved filename, which carries the
+        // extension the export should keep.
+        filename: image.url.split('/').pop() ?? undefined,
+      }));
+    if (!items.length) return;
+
+    setIsExporting(true);
+    try {
+      const result = await window.api.files.exportBatch(items);
+      if (result.cancelled) return;
+
+      if (result.exported > 0) {
+        toast.success(
+          result.failed > 0
+            ? `Exported ${result.exported} images. ${result.failed} couldn't be saved.`
+            : `Exported ${result.exported} image${result.exported === 1 ? '' : 's'}.`,
+        );
+        clearSelection();
+      } else {
+        toast.error("Couldn't export those images.");
+      }
+    } catch (err) {
+      toast.error(cleanIpcError(err, "Couldn't export those images."));
+    } finally {
+      setIsExporting(false);
+    }
+  }, [selectedCount, isExporting, generatedImages, selectedImages, clearSelection]);
 
   const confirmBatchDelete = useCallback(async () => {
     const ids = Array.from(selectedImages);
@@ -304,6 +346,16 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
             >
               {selectedCount} selected
             </span>
+            <button
+              type="button"
+              onClick={handleExportSelected}
+              disabled={isExporting}
+              className="btn-cinamon btn-sm"
+              title="Save the selected images into one folder"
+            >
+              <DownloadIcon />
+              {isExporting ? 'Exporting…' : 'Export'}
+            </button>
             <button
               type="button"
               onClick={handleBatchDeleteClick}

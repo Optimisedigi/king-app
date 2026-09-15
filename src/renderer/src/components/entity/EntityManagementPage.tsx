@@ -7,7 +7,9 @@ import { useEntityManagement } from '@/hooks/useEntityManagement';
 import type { UploadedImage, EntityType } from '@/hooks/useEntityManagement';
 import type { EntityData } from '@/types/electron';
 import type { PageType } from '@/App';
-import { SparkleIcon } from '@/components/icons';
+import { toast } from 'sonner';
+import { SparkleIcon, UploadIcon } from '@/components/icons';
+import { SUPPORTED_IMAGE_ACCEPT } from '@/lib/constants/image-form';
 
 interface EntityManagementPageProps {
   entityType: EntityType;
@@ -40,6 +42,7 @@ export default function EntityManagementPage({
     editingEntity,
     deleteEntityId,
     handleCreate,
+    handleBulkCreate,
     handleSaveEdit,
     handleDelete,
     confirmDelete,
@@ -92,6 +95,32 @@ export default function EntityManagementPage({
     onNavigate('image');
   };
 
+  /**
+   * Bulk upload makes one entity per file, named from the filename, so a whole
+   * folder of product photos becomes a whole catalogue in one step.
+   */
+  const handleBulkFilesSelected = async (files: File[]) => {
+    if (!files.length) return;
+    const label = entityType === 'products' ? 'product' : 'character';
+
+    const toastId = toast.loading(`Creating ${files.length} ${label}s…`);
+    try {
+      const { created, failed } = await handleBulkCreate(files);
+      if (created > 0) {
+        toast.success(
+          failed > 0
+            ? `Created ${created} ${label}s. ${failed} couldn't be saved.`
+            : `Created ${created} ${label}s.`,
+          { id: toastId },
+        );
+      } else {
+        toast.error(`Couldn't create any ${label}s. Please try again.`, { id: toastId });
+      }
+    } catch {
+      toast.error(`Couldn't create those ${label}s. Please try again.`, { id: toastId });
+    }
+  };
+
   return (
     <>
       <UploadModal
@@ -130,15 +159,42 @@ export default function EntityManagementPage({
           <p className="mt-2 text-sm text-[var(--base-color-brand--umber)]">{subtitle}</p>
         </div>
 
-        {/* CTA Button */}
-        <button
-          onClick={() => setIsUploadModalOpen(true)}
-          disabled={isCreating}
-          className="btn-cinamon mb-4"
-        >
-          <SparkleIcon className="size-5" />
-          {isCreating ? 'Creating...' : createLabel}
-        </button>
+        {/* CTA Buttons */}
+        <div className="mb-4 flex flex-wrap items-center justify-center gap-3">
+          <button
+            onClick={() => setIsUploadModalOpen(true)}
+            disabled={isCreating}
+            className="btn-cinamon"
+          >
+            <SparkleIcon className="size-5" />
+            {isCreating ? 'Creating...' : createLabel}
+          </button>
+
+          <label
+            className={`flex h-11 items-center gap-2 rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] px-5 text-sm font-semibold text-[var(--base-color-brand--bean)] transition-colors ${
+              isCreating
+                ? 'pointer-events-none opacity-50'
+                : 'cursor-pointer hover:text-[var(--base-color-brand--cinamon)]'
+            }`}
+            title={`Create one ${entityType === 'products' ? 'product' : 'character'} per photo, named from the filename`}
+          >
+            <UploadIcon className="size-4" />
+            Bulk upload
+            <input
+              type="file"
+              accept={SUPPORTED_IMAGE_ACCEPT}
+              multiple
+              className="hidden"
+              disabled={isCreating}
+              onChange={(e) => {
+                const files = e.target.files;
+                if (files?.length) void handleBulkFilesSelected(Array.from(files));
+                // Allow re-selecting the same folder after a run.
+                e.target.value = '';
+              }}
+            />
+          </label>
+        </div>
 
         {/* Content Grid */}
         <div className="relative grid w-full [&>*]:col-start-1 [&>*]:row-start-1">

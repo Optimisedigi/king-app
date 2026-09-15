@@ -207,6 +207,17 @@ export interface ElectronAPI {
       url: string,
       filename: string,
     ) => Promise<{ success: boolean; filePath?: string; cancelled?: boolean }>;
+    /**
+     * Save many saved images into one folder the user picks once. Each item
+     * supplies the name to use; the folder is chosen in a single dialog.
+     */
+    exportBatch: (items: { url: string; name: string; filename?: string }[]) => Promise<{
+      success: boolean;
+      directory?: string;
+      exported: number;
+      failed: number;
+      cancelled?: boolean;
+    }>;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
+import { planBulkProducts } from '@/lib/bulkProducts';
 import type { EntityData } from '@/types/electron';
 
 export type EntityType = 'characters' | 'products';
@@ -32,6 +33,7 @@ interface UseEntityManagementReturn {
     images: UploadedImage[],
     productType?: string,
   ) => Promise<void>;
+  handleBulkCreate: (files: File[]) => Promise<{ created: number; failed: number }>;
   handleDelete: (id: string) => void;
   confirmDelete: () => Promise<void>;
   cancelDelete: () => void;
@@ -94,6 +96,45 @@ export function useEntityManagement({
       } finally {
         setIsCreating(false);
       }
+    },
+    [entityType, fetchEntities, entities],
+  );
+
+  /**
+   * Create one entity per file, named from its filename.
+   *
+   * Runs sequentially: each create writes the shared JSON store, and the main
+   * process serialises those writes anyway, so firing them in parallel buys
+   * nothing and makes a partial failure harder to report.
+   */
+  const handleBulkCreate = useCallback(
+    async (files: File[]) => {
+      setIsCreating(true);
+      let created = 0;
+      let failed = 0;
+      try {
+        const planned = planBulkProducts(
+          files,
+          entities.map((e) => e.name),
+        );
+
+        for (const item of planned) {
+          try {
+            await window.api.entities.create(entityType, {
+              name: item.name,
+              files: [{ name: item.file.name, buffer: await item.file.arrayBuffer() }],
+            });
+            created++;
+          } catch {
+            failed++;
+          }
+        }
+
+        await fetchEntities();
+      } finally {
+        setIsCreating(false);
+      }
+      return { created, failed };
     },
     [entityType, fetchEntities, entities],
   );
@@ -173,6 +214,7 @@ export function useEntityManagement({
     deleteEntityId,
     fetchEntities,
     handleCreate,
+    handleBulkCreate,
     handleSaveEdit,
     handleDelete,
     confirmDelete,
