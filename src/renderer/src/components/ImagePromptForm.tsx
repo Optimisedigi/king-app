@@ -392,7 +392,7 @@ export default function ImagePromptForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="fixed inset-x-1/2 bottom-4 z-20 hidden w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[2rem] border border-[var(--base-color-brand--umber)]/30 bg-[var(--base-color-brand--champagne)] p-[22px] shadow-[0_12px_40px_-12px_rgba(51,32,26,0.25)] md:block lg:max-w-[65rem]"
+      className="fixed inset-x-1/2 bottom-4 z-20 hidden w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[2rem] border border-[var(--base-color-brand--umber)]/30 bg-[var(--base-color-brand--champagne)] p-[22px] shadow-[0_12px_40px_-12px_rgba(51,32,26,0.25)] md:block lg:max-w-[1065px]"
     >
       <fieldset className="relative z-20 flex gap-3">
         {/* Left section */}
@@ -479,9 +479,10 @@ export default function ImagePromptForm({
             />
           </div>
 
-          {/* Controls row — wraps rather than pushing the Generate button out
-              of the panel when the window is narrow. */}
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {/* Controls row — a tight gap keeps every control, including the
+              file type, on one line at the panel's full width; it still wraps
+              rather than pushing the Generate button out on a narrow window. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <SavedPromptsMenu
               currentPrompt={prompt}
               onUsePrompt={(saved) => {
@@ -596,13 +597,14 @@ export default function ImagePromptForm({
           </div>
         </div>
 
-        {/* Right section - Generate button */}
-        <aside className="flex h-[84px] shrink-0 items-end justify-end gap-3 self-end">
+        {/* Right section — Generate matches the 40px height of the dropdowns
+            it sits beside. */}
+        <aside className="flex shrink-0 items-end justify-end gap-3 self-end">
           <button
             type="submit"
             disabled={isImagesLoading}
             tabIndex={-1}
-            className="inline-grid h-full w-28 grid-flow-col items-center justify-center gap-2 rounded-full border-none bg-[var(--base-color-brand--cinamon)] px-2.5 text-sm font-semibold tracking-wide text-[var(--base-color-brand--shell)] shadow-[0_4px_0_0_var(--base-color-brand--dark-red)] transition-all duration-150 hover:bg-[var(--base-color-brand--red)] focus:outline-none active:translate-y-0.5 active:shadow-[0_2px_0_0_var(--base-color-brand--dark-red)] disabled:cursor-not-allowed disabled:bg-[var(--base-color-brand--umber)] disabled:text-[var(--base-color-brand--shell)]/70 disabled:shadow-[0_4px_0_0_var(--base-color-brand--bean)]"
+            className="inline-grid h-10 w-28 grid-flow-col items-center justify-center gap-2 rounded-full border-none bg-[var(--base-color-brand--cinamon)] px-2.5 text-sm font-semibold tracking-wide text-[var(--base-color-brand--shell)] shadow-[0_4px_0_0_var(--base-color-brand--dark-red)] transition-all duration-150 hover:bg-[var(--base-color-brand--red)] focus:outline-none active:translate-y-0.5 active:shadow-[0_2px_0_0_var(--base-color-brand--dark-red)] disabled:cursor-not-allowed disabled:bg-[var(--base-color-brand--umber)] disabled:text-[var(--base-color-brand--shell)]/70 disabled:shadow-[0_4px_0_0_var(--base-color-brand--bean)]"
             style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
           >
             <div className="flex items-center gap-2">
