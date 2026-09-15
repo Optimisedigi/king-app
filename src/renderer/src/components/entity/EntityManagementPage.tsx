@@ -8,6 +8,7 @@ import type { UploadedImage, EntityType } from '@/hooks/useEntityManagement';
 import type { EntityData } from '@/types/electron';
 import type { PageType } from '@/App';
 import { toast } from 'sonner';
+import { MAX_BULK_ITEMS } from '@/lib/bulkProducts';
 import { SparkleIcon, UploadIcon } from '@/components/icons';
 import { SUPPORTED_IMAGE_ACCEPT } from '@/lib/constants/image-form';
 
@@ -103,7 +104,16 @@ export default function EntityManagementPage({
     if (!files.length) return;
     const label = entityType === 'products' ? 'product' : 'character';
 
-    const toastId = toast.loading(`Creating ${files.length} ${label}s…`);
+    // Anything past the cap is ignored, so say so rather than silently
+    // dropping files the user picked.
+    const skipped = Math.max(0, files.length - MAX_BULK_ITEMS);
+    if (skipped > 0) {
+      toast.warning(
+        `Only the first ${MAX_BULK_ITEMS} photos will be used; ${skipped} were skipped.`,
+      );
+    }
+
+    const toastId = toast.loading(`Creating ${files.length - skipped} ${label}s…`);
     try {
       const { created, failed } = await handleBulkCreate(files);
       if (created > 0) {

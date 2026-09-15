@@ -3,9 +3,10 @@ import { extname } from 'path';
 /**
  * Filenames for a bulk export.
  *
- * Exported images are named after the product and shot, so a folder of 30
- * files is readable without opening them. Names come from user data, so they
- * are sanitised into a safe, flat filename with no path separators.
+ * Each file is named from the caller-supplied label — currently the image's
+ * prompt, which for batch and angle-set runs already begins with the product
+ * name. That text is user data, so it is sanitised into a safe, flat filename
+ * with no path separators before it reaches the filesystem.
  */
 
 /** Windows reserves these device names regardless of extension. */

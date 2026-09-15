@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { nameFromFilename, uniqueName, planBulkProducts } from '@/lib/bulkProducts';
+import {
+  nameFromFilename,
+  uniqueName,
+  planBulkProducts,
+  FALLBACK_NAME,
+  MAX_BULK_ITEMS,
+} from '@/lib/bulkProducts';
 
 describe('nameFromFilename', () => {
   it('drops the extension', () => {
@@ -16,9 +22,10 @@ describe('nameFromFilename', () => {
     expect(nameFromFilename('cake copy 2.png')).toBe('Cake');
   });
 
-  it('falls back when the filename has no usable text', () => {
-    expect(nameFromFilename('.png')).toBe('Untitled product');
-    expect(nameFromFilename('___.png')).toBe('Untitled product');
+  it('falls back to a name that suits products and characters alike', () => {
+    expect(nameFromFilename('.png')).toBe(FALLBACK_NAME);
+    expect(nameFromFilename('___.png')).toBe(FALLBACK_NAME);
+    expect(FALLBACK_NAME.toLowerCase()).not.toContain('product');
   });
 
   it('handles names containing dots', () => {
@@ -59,7 +66,10 @@ describe('planBulkProducts', () => {
   });
 
   it('keeps every planned name unique within one upload', () => {
-    const planned = planBulkProducts([file('cake.png'), file('cake (1).png'), file('CAKE.png')], []);
+    const planned = planBulkProducts(
+      [file('cake.png'), file('cake (1).png'), file('CAKE.png')],
+      [],
+    );
     const names = planned.map((p) => p.name.toLowerCase());
     expect(new Set(names).size).toBe(3);
   });
@@ -74,5 +84,10 @@ describe('planBulkProducts', () => {
 
   it('returns nothing for an empty selection', () => {
     expect(planBulkProducts([], [])).toEqual([]);
+  });
+
+  it('caps a huge selection instead of queueing unbounded writes', () => {
+    const many = Array.from({ length: MAX_BULK_ITEMS + 25 }, (_, i) => file(`p${i}.png`));
+    expect(planBulkProducts(many, [])).toHaveLength(MAX_BULK_ITEMS);
   });
 });

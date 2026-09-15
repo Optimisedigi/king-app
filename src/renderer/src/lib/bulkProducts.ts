@@ -1,10 +1,17 @@
 /**
- * Turning a folder of photos into one product per photo.
+ * Turning a folder of photos into one entity per photo.
  *
- * The product name comes from the filename, since that is the only label a
- * bulk upload carries. Names must be unique because the rest of the app keys
- * products by name for the user, and duplicates are rejected on create.
+ * Used for products and characters alike, so nothing here assumes which. The
+ * name comes from the filename, since that is the only label a bulk upload
+ * carries. Names must be unique because the rest of the app keys entities by
+ * name for the user, and duplicates are rejected on create.
  */
+
+/** Used when a filename carries no usable text at all. */
+export const FALLBACK_NAME = 'Untitled';
+
+/** The most entities one bulk upload may create, matching the export cap. */
+export const MAX_BULK_ITEMS = 500;
 
 /** Strip the extension, tidy separators and trailing numbering. */
 export function nameFromFilename(filename: string): string {
@@ -17,7 +24,7 @@ export function nameFromFilename(filename: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (!spaced) return 'Untitled product';
+  if (!spaced) return FALLBACK_NAME;
 
   // Title-case each word so "blueberry cheesecake" reads as a product name.
   return spaced
@@ -52,12 +59,13 @@ export interface PlannedProduct {
 }
 
 /**
- * Plan one product per file, skipping names that would collide with products
- * that already exist.
+ * Plan one entity per file, avoiding names that would collide with entities
+ * that already exist. Beyond `MAX_BULK_ITEMS` the extra files are ignored, so
+ * a stray folder selection can't queue thousands of writes.
  */
 export function planBulkProducts(files: File[], existingNames: string[]): PlannedProduct[] {
   const taken = new Set(existingNames.map((n) => n.trim().toLowerCase()));
-  return files.map((file) => ({
+  return files.slice(0, MAX_BULK_ITEMS).map((file) => ({
     name: uniqueName(nameFromFilename(file.name), taken),
     file,
   }));
