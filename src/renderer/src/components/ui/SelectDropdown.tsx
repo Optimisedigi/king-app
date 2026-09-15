@@ -62,11 +62,11 @@ export default memo(function SelectDropdown({
       <button
         type="button"
         onClick={handleToggle}
-        className={`flex items-center justify-between gap-2 rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] text-[var(--text-color--text-primary)] transition hover:border-[var(--base-color-brand--bean)] ${size === 'sm' ? 'h-6 px-3 text-xs' : 'h-10 px-4 text-sm'} ${fullWidth ? 'w-full' : ''}`}
+        className={`flex shrink-0 items-center justify-between gap-2 rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] text-[var(--text-color--text-primary)] transition hover:border-[var(--base-color-brand--bean)] ${size === 'sm' ? 'h-6 px-3 text-[10px]' : 'h-10 px-4 text-[11px]'} ${fullWidth ? 'w-full' : ''}`}
       >
         <div className="flex items-center gap-2">
           {icon}
-          <span>{selectedOption?.label || placeholder}</span>
+          <span className="whitespace-nowrap">{selectedOption?.label || placeholder}</span>
         </div>
         <ChevronDownIcon />
       </button>

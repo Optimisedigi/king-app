@@ -28,7 +28,8 @@ const adsItems: { page: PageType; label: string }[] = [
   { page: 'shopee-ads', label: 'Shopee Ads' },
 ];
 
-const trailingItems: { page: PageType; label: string }[] = [{ page: 'store', label: 'Your Store' }];
+// 'Your Store' and 'APIs' now live in the Settings modal, which keeps the
+// header from overflowing on narrow windows.
 
 export default function Header({ currentPage, onNavigate }: HeaderProps) {
   const [adsOpen, setAdsOpen] = useState(false);
@@ -49,7 +50,7 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
   const activeAdsLabel = adsItems.find((item) => item.page === currentPage)?.label;
 
   const navButtonClass = (active: boolean) =>
-    `rounded-full border px-3.5 py-1.5 text-xs font-semibold tracking-wide transition-colors ${
+    `shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-semibold tracking-wide whitespace-nowrap transition-colors ${
       active
         ? 'border-[var(--base-color-brand--bean)] bg-[var(--base-color-brand--bean)] text-[var(--base-color-brand--shell)]'
         : 'border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] text-[var(--base-color-brand--bean)] hover:border-[var(--base-color-brand--bean)] hover:bg-[var(--base-color-brand--bean)] hover:text-[var(--base-color-brand--shell)]'
@@ -62,9 +63,15 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
       {/* Actual header content below the title bar */}
       <header className="flex h-14 shrink-0 items-center border-b border-[var(--base-color-brand--umber)]/30 bg-[var(--base-color-brand--shell)] px-4">
         <div className="flex items-center gap-2">
+          {/* Never wraps: the type scales down with the viewport instead, so a
+              narrow window shrinks the wordmark rather than breaking it over
+              two lines. */}
           <h1
-            className="text-2xl leading-none font-black tracking-tight text-[var(--base-color-brand--bean)]"
-            style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
+            className="leading-none font-black tracking-tight whitespace-nowrap text-[var(--base-color-brand--bean)]"
+            style={{
+              fontFamily: 'var(--text-color--font-family--heading)',
+              fontSize: 'clamp(0.9rem, 1.6vw, 1.5rem)',
+            }}
           >
             OptiMate Image Editor
           </h1>
@@ -78,7 +85,7 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
             v{APP_VERSION}
           </span>
         </div>
-        <nav className="ml-6 flex items-center gap-2">
+        <nav className="ml-6 flex min-w-0 items-center gap-2">
           {navItems.map(({ page, label }) => {
             const active = currentPage === page;
             return (
@@ -133,20 +140,6 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
               </div>
             )}
           </div>
-
-          {trailingItems.map(({ page, label }) => {
-            const active = currentPage === page;
-            return (
-              <button
-                key={page}
-                onClick={() => onNavigate(page)}
-                className={navButtonClass(active)}
-                style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
-              >
-                {label}
-              </button>
-            );
-          })}
         </nav>
         <div className="no-drag ml-auto flex items-center gap-2">
           {/* Master demo-mode switch. Dev-only — `import.meta.env.DEV` is
@@ -155,9 +148,6 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
               tree-shaking. End users in shipped releases never see the toggle,
               and the underlying localStorage default is OFF anyway. */}
           {import.meta.env.DEV && <DemoToggle />}
-          <button onClick={() => onNavigate('apis')} className="btn-cinamon btn-sm">
-            APIs
-          </button>
           <button
             onClick={() => setSettingsOpen(true)}
             aria-label="Open settings"
@@ -167,7 +157,11 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
           </button>
         </div>
       </header>
-      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onNavigate={onNavigate}
+      />
     </>
   );
 }

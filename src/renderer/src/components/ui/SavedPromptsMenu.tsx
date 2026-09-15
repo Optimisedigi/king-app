@@ -86,7 +86,7 @@ export default function SavedPromptsMenu({
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
         title="Save this prompt, or load one you saved earlier"
-        className="flex h-10 shrink-0 items-center rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] px-3 text-sm font-semibold text-[var(--base-color-brand--bean)] transition-colors hover:text-[var(--base-color-brand--cinamon)]"
+        className="flex h-10 shrink-0 items-center rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] px-3 text-[11px] font-semibold whitespace-nowrap text-[var(--base-color-brand--bean)] transition-colors hover:text-[var(--base-color-brand--cinamon)]"
       >
         Prompts
       </button>

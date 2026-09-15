@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { UpdaterStatus } from '@/types/electron';
+import type { PageType } from '@/App';
 import { CloseIcon, DownloadIcon, RefreshIcon } from '@/components/icons';
 import SelectDropdown from '@/components/ui/SelectDropdown';
 import { useModelStore, type ImageModel } from '@/stores/modelStore';
@@ -34,7 +35,23 @@ const HOW_TO_ENTRIES = [
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Navigates to a page and closes the modal; omit to hide those shortcuts. */
+  onNavigate?: (page: PageType) => void;
 }
+
+/** Pages reached from Settings rather than the header. */
+const SHORTCUT_PAGES: { page: PageType; label: string; description: string }[] = [
+  {
+    page: 'store',
+    label: 'Your Store',
+    description: 'Connect Shopify or TikTok Shop and browse your products.',
+  },
+  {
+    page: 'apis',
+    label: 'APIs',
+    description: 'Add or update the API keys and accounts used to generate images.',
+  },
+];
 
 /**
  * Formats a byte/sec number into a human-readable download speed.
@@ -115,7 +132,7 @@ function sanitizeReleaseNotes(html: string): string {
   return doc.body.innerHTML;
 }
 
-export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
+export default function SettingsModal({ isOpen, onClose, onNavigate }: SettingsModalProps) {
   const [status, setStatus] = useState<UpdaterStatus>({
     stage: 'idle',
     currentVersion: '…',
@@ -206,6 +223,33 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <CloseIcon />
           </button>
         </div>
+
+        {/* Shortcuts moved out of the header so it can't overflow. */}
+        {onNavigate && (
+          <section className="mt-6 grid gap-2 sm:grid-cols-2">
+            {SHORTCUT_PAGES.map(({ page, label, description }) => (
+              <button
+                key={page}
+                type="button"
+                onClick={() => {
+                  onNavigate(page);
+                  onClose();
+                }}
+                className="rounded-2xl border border-[var(--base-color-brand--umber)]/30 bg-[var(--base-color-brand--champagne)]/60 px-4 py-3 text-left transition-colors hover:border-[var(--base-color-brand--bean)]"
+              >
+                <p
+                  className="text-sm font-semibold text-[var(--base-color-brand--bean)]"
+                  style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
+                >
+                  {label}
+                </p>
+                <p className="mt-0.5 text-xs leading-snug text-[var(--base-color-brand--umber)]">
+                  {description}
+                </p>
+              </button>
+            ))}
+          </section>
+        )}
 
         {/* Image model — applies to generations started from the Image page.
             Clone and Create Ads still run on GPT Image 2. */}
