@@ -28,8 +28,8 @@ const adsItems: { page: PageType; label: string }[] = [
   { page: 'shopee-ads', label: 'Shopee Ads' },
 ];
 
-// 'Your Store' and 'APIs' now live in the Settings modal, which keeps the
-// header from overflowing on narrow windows.
+// 'Your Store' and 'APIs' now live in the Settings modal, which shortens the
+// header; the nav itself scrolls if the remaining items still don't fit.
 
 export default function Header({ currentPage, onNavigate }: HeaderProps) {
   const [adsOpen, setAdsOpen] = useState(false);
@@ -85,7 +85,10 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
             v{APP_VERSION}
           </span>
         </div>
-        <nav className="ml-6 flex min-w-0 items-center gap-2">
+        {/* Buttons never wrap their own text, so the row scrolls horizontally
+            when the window is too narrow for all of them, rather than pushing
+            the settings controls off-screen. */}
+        <nav className="hide-scrollbar ml-6 flex min-w-0 items-center gap-2 overflow-x-auto">
           {navItems.map(({ page, label }) => {
             const active = currentPage === page;
             return (

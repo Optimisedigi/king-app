@@ -100,33 +100,46 @@ function sanitizeReleaseNotes(html: string): string {
   // through it gives us a real DOM tree instead of regex-mangling tags.
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
-  const walk = (node: Node): void => {
-    // Iterate over a snapshot of childNodes since we mutate during walk.
-    for (const child of Array.from(node.childNodes)) {
-      if (child.nodeType === Node.ELEMENT_NODE) {
-        const el = child as Element;
-        const tag = el.tagName.toLowerCase();
-        if (!ALLOWED_TAGS.has(tag)) {
-          // Replace the disallowed element with its children (keep text).
-          while (el.firstChild) el.parentNode?.insertBefore(el.firstChild, el);
-          el.remove();
-          continue;
-        }
-        // Strip every attribute, then re-add only safe ones.
-        const attrs = Array.from(el.attributes);
-        for (const attr of attrs) el.removeAttribute(attr.name);
-        if (tag === 'a') {
-          const href = attrs.find((a) => a.name.toLowerCase() === 'href')?.value ?? '';
-          if (/^https?:\/\//i.test(href)) {
-            el.setAttribute('href', href);
-            el.setAttribute('target', '_blank');
-            el.setAttribute('rel', 'noopener noreferrer');
-          }
-        }
-        walk(el);
+  /**
+   * Sanitise one element in place, then its subtree. Used both for elements
+   * found by the walk and for children hoisted out of a removed wrapper —
+   * those are promoted after the caller's snapshot was taken, so without this
+   * `<span><img onerror=...>` would survive with its attributes intact.
+   */
+  const sanitizeElement = (el: Element): void => {
+    const tag = el.tagName.toLowerCase();
+    if (!ALLOWED_TAGS.has(tag)) {
+      const hoisted: Element[] = [];
+      while (el.firstChild) {
+        const moved = el.firstChild;
+        el.parentNode?.insertBefore(moved, el);
+        if (moved.nodeType === Node.ELEMENT_NODE) hoisted.push(moved as Element);
+      }
+      el.remove();
+      for (const promoted of hoisted) sanitizeElement(promoted);
+      return;
+    }
+
+    const attrs = Array.from(el.attributes);
+    for (const attr of attrs) el.removeAttribute(attr.name);
+    if (tag === 'a') {
+      const href = attrs.find((a) => a.name.toLowerCase() === 'href')?.value ?? '';
+      if (/^https?:\/\//i.test(href)) {
+        el.setAttribute('href', href);
+        el.setAttribute('target', '_blank');
+        el.setAttribute('rel', 'noopener noreferrer');
       }
     }
+    walk(el);
   };
+
+  function walk(node: Node): void {
+    // Snapshot childNodes because sanitising mutates the tree; anything
+    // hoisted during that mutation is sanitised by `sanitizeElement` itself.
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === Node.ELEMENT_NODE) sanitizeElement(child as Element);
+    }
+  }
 
   walk(doc.body);
   return doc.body.innerHTML;
@@ -338,10 +351,9 @@ export default function SettingsModal({ isOpen, onClose, onNavigate }: SettingsM
           )}
 
           {/* Release notes (available / downloaded). electron-updater's
-              GitHub provider returns the release body as HTML (paragraphs,
-              line breaks, entity-encoded angle brackets). We strip it to
-              plain text rather than risk dangerouslySetInnerHTML — zero XSS
-              surface even if a release author somewhere injects markup. */}
+              GitHub provider returns the release body as HTML, which we run
+              through `sanitizeReleaseNotes` before rendering so paragraphs and
+              lists display as markup rather than literal tags. */}
           {(isAvailable || isDownloaded) && status.releaseNotes && (
             <div className="mt-3 max-h-32 overflow-auto rounded-xl bg-[var(--base-color-brand--shell)] p-3 text-xs text-[var(--base-color-brand--bean)]">
               <p className="font-semibold">What’s new</p>

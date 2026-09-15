@@ -19,6 +19,8 @@ export default function SavedPromptsMenu({
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState<SavedPromptData[]>([]);
   const [busy, setBusy] = useState(false);
+  const [naming, setNaming] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(async () => {
@@ -43,22 +45,35 @@ export default function SavedPromptsMenu({
     return () => document.removeEventListener('mousedown', onPointerDown);
   }, [open]);
 
-  const handleSave = async () => {
+  /**
+   * Reveal the name field, pre-filled from the prompt's first line. Electron
+   * deliberately does not implement `window.prompt` — it throws — so naming
+   * happens inline rather than in a browser dialog.
+   */
+  const startNaming = () => {
     const prompt = currentPrompt.trim();
     if (!prompt) {
       toast.error('Type a prompt before saving it.');
       return;
     }
+    setTitleDraft(prompt.split('\n')[0]?.slice(0, 60) ?? 'Saved prompt');
+    setNaming(true);
+  };
 
-    // First line, trimmed, makes a reasonable default name.
-    const suggested = prompt.split('\n')[0]?.slice(0, 60) ?? 'Saved prompt';
-    const title = window.prompt('Name this prompt', suggested)?.trim();
-    if (!title) return;
+  const handleSave = async () => {
+    const prompt = currentPrompt.trim();
+    const title = titleDraft.trim();
+    if (!prompt || !title) {
+      toast.error('Give the prompt a name first.');
+      return;
+    }
 
     setBusy(true);
     try {
       await window.api.savedPrompts.create({ title, prompt });
       await refresh();
+      setNaming(false);
+      setTitleDraft('');
       toast.success('Prompt saved.');
     } catch (err) {
       toast.error(cleanIpcError(err, "Couldn't save that prompt."));
@@ -93,14 +108,51 @@ export default function SavedPromptsMenu({
 
       {open && (
         <div className="absolute bottom-full left-0 z-50 mb-2 max-h-80 w-80 overflow-y-auto rounded-2xl border border-[var(--base-color-brand--umber)]/30 bg-[var(--base-color-brand--champagne)] p-2 shadow-xl">
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={busy}
-            className="w-full rounded-xl bg-[var(--base-color-brand--bean)] px-3 py-2 text-sm font-semibold text-[var(--base-color-brand--champagne)] disabled:opacity-50"
-          >
-            Save current prompt
-          </button>
+          {naming ? (
+            <div className="flex flex-col gap-2">
+              <input
+                autoFocus
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void handleSave();
+                  }
+                  if (e.key === 'Escape') setNaming(false);
+                }}
+                placeholder="Name this prompt"
+                aria-label="Name this prompt"
+                className="w-full rounded-xl border border-[var(--base-color-brand--umber)]/40 bg-[var(--base-color-brand--shell)] px-3 py-2 text-sm text-[var(--base-color-brand--bean)] focus:outline-none"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={busy || !titleDraft.trim()}
+                  className="flex-1 rounded-xl bg-[var(--base-color-brand--bean)] px-3 py-2 text-sm font-semibold text-[var(--base-color-brand--champagne)] disabled:opacity-50"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNaming(false)}
+                  className="rounded-xl px-3 py-2 text-sm text-[var(--base-color-brand--umber)] hover:text-[var(--base-color-brand--bean)]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={startNaming}
+              disabled={busy}
+              className="w-full rounded-xl bg-[var(--base-color-brand--bean)] px-3 py-2 text-sm font-semibold text-[var(--base-color-brand--champagne)] disabled:opacity-50"
+            >
+              Save current prompt
+            </button>
+          )}
 
           {saved.length === 0 ? (
             <p className="px-3 py-4 text-center text-xs text-[var(--base-color-brand--umber)]">
