@@ -1,3 +1,5 @@
+import type { ShootTemplate, ShootTemplateDraft } from '../../../shared/shootTemplates';
+
 export type ImageModelId =
   | 'nano_banana_pro'
   | 'gpt_image_2'
@@ -386,6 +388,16 @@ export interface ElectronAPI {
       },
     ) => Promise<EntityData>;
     delete: (entityType: string, id: string) => Promise<{ success: boolean }>;
+  };
+  /** Local composition references and framing guides. */
+  shootTemplates: {
+    list: () => Promise<ShootTemplate[]>;
+    preview: (source: string) => Promise<{ dataUrl: string; width: number; height: number }>;
+    get: (id: string) => Promise<ShootTemplate | null>;
+    create: (draft: ShootTemplateDraft) => Promise<ShootTemplate>;
+    update: (id: string, revision: number, draft: ShootTemplateDraft) => Promise<ShootTemplate>;
+    archive: (id: string, revision: number) => Promise<ShootTemplate>;
+    preflight: (template: ShootTemplate) => Promise<void>;
   };
   /** The user's own reusable prompts, saved to run across many products. */
   savedPrompts: {

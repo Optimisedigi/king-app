@@ -20,6 +20,8 @@ import {
   type GenerationTarget,
 } from '@/lib/generationJobs';
 import type { ImageModelId } from '@/types/electron';
+import type { ShootAngle, ShootTemplate } from '../../../shared/shootTemplates';
+import { templatesForPreflight, type CompositionAssignments } from '@/lib/compositionAssignments';
 
 /**
  * Which model name to record on the saved image, matching what actually
@@ -183,7 +185,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     setEditData({ imageUrl });
   }, []);
 
-  const handleGenerate = (data: {
+  const handleGenerate = async (data: {
     prompt: string;
     count: number;
     aspectRatio: string;
@@ -195,17 +197,40 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     angleShots?: AngleShot[];
     /** One entry per product in a batch run; omitted for a single run. */
     targets?: GenerationTarget[];
-  }) => {
+    composition?: ShootTemplate;
+    compositions?: CompositionAssignments;
+    singleShotAngle?: ShootAngle;
+  }): Promise<void> => {
     const angleShots = data.angleShots;
     const isAngleSet = Boolean(angleShots?.length);
     const targets = data.targets?.length ? data.targets : [defaultTarget(data.referenceImages)];
 
-    const jobs = buildGenerationJobs({
-      basePrompt: data.prompt,
-      targets,
-      count: data.count,
-      ...(angleShots ? { angleShots } : {}),
-    });
+    let jobs: ReturnType<typeof buildGenerationJobs>;
+    try {
+      const snapshot = data.composition ? structuredClone(data.composition) : undefined;
+      const compositions = data.compositions ? structuredClone(data.compositions) : undefined;
+      jobs = buildGenerationJobs({
+        basePrompt: data.prompt,
+        targets,
+        count: data.count,
+        composition: snapshot,
+        compositions,
+        singleShotAngle: data.singleShotAngle,
+        aspectRatio: data.aspectRatio,
+        ...(angleShots ? { angleShots } : {}),
+      });
+      if (snapshot) await window.api.shootTemplates.preflight(snapshot);
+      if (compositions) {
+        for (const template of templatesForPreflight(compositions)) {
+          await window.api.shootTemplates.preflight(template);
+        }
+      }
+    } catch (error) {
+      toast.error(
+        cleanIpcError(error, 'Composition could not be prepared. No images were queued.'),
+      );
+      return;
+    }
     for (const job of jobs) {
       addImageGeneration(job.id, labelledPrompt(job.prompt, job.targetLabel));
     }
@@ -237,7 +262,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
         try {
           const result = await window.api.generate.image({
             prompt: job.prompt,
-            aspectRatio: data.aspectRatio,
+            aspectRatio: job.aspectRatio ?? data.aspectRatio,
             resolution: data.resolution,
             outputFormat: data.outputFormat,
             imageUrls: job.referenceImages,
@@ -255,7 +280,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
             const savedImage = await window.api.images.save({
               url,
               prompt: savedPrompt,
-              aspectRatio: data.aspectRatio,
+              aspectRatio: job.aspectRatio ?? data.aspectRatio,
               // The fal path honours every variant; the OpenAI paths honour
               // the GPT Image 2.5 variants and otherwise use GPT Image 2.
               model,

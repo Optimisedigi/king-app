@@ -1,4 +1,10 @@
 import type { AngleShot } from './productAngles';
+import {
+  preflightCompositionAssignments,
+  type CompositionAssignments,
+} from './compositionAssignments';
+import { buildCompositionRequest, preflightComposition } from './compositionPrompt';
+import { SHOOT_ANGLES, type ShootAngle, type ShootTemplate } from '../../../shared/shootTemplates';
 
 /**
  * Planning for a generation run.
@@ -26,6 +32,8 @@ export interface GenerationJob {
   angleId: string | null;
   prompt: string;
   referenceImages: string[];
+  /** Fixed output aspect for a per-angle composition assignment. */
+  aspectRatio?: ShootTemplate['aspectRatio'];
 }
 
 /** The single unnamed target used when the run isn't a product batch. */
@@ -47,16 +55,51 @@ export function buildGenerationJobs(options: {
   targets: GenerationTarget[];
   count: number;
   angleShots?: AngleShot[];
+  composition?: ShootTemplate;
+  compositions?: CompositionAssignments;
+  singleShotAngle?: ShootAngle;
+  aspectRatio?: string;
   /** Injectable so tests get stable ids. */
   idPrefix?: string;
 }): GenerationJob[] {
   const { basePrompt, targets, count, angleShots } = options;
+  if (options.composition && options.compositions)
+    throw new Error('Use either composition or compositions, not both.');
+  const compositions = options.compositions ? structuredClone(options.compositions) : undefined;
+  if (compositions) {
+    if (
+      angleShots?.length !== SHOOT_ANGLES.length ||
+      !SHOOT_ANGLES.every((angle) => angleShots.some((shot) => shot.angleId === angle))
+    )
+      throw new Error('Per-angle compositions require an eye-level and elevated-45 angle set.');
+    preflightCompositionAssignments({ assignments: compositions, targets, basePrompt });
+  }
+  const composition = options.composition ? structuredClone(options.composition) : undefined;
+  const singleAngle = options.singleShotAngle ?? 'eye-level';
+  const angles =
+    composition && angleShots?.length
+      ? angleShots.map((shot) => {
+          const angle = SHOOT_ANGLES.find((value) => value === shot.angleId);
+          if (!angle) throw new Error('Unsupported composition angle.');
+          return angle;
+        })
+      : [singleAngle];
+  if (composition)
+    preflightComposition({
+      template: composition,
+      aspectRatio: options.aspectRatio ?? '',
+      targets,
+      angles,
+      basePrompt,
+    });
   const prefix = options.idPrefix ?? `img-${Date.now()}`;
   const jobs: GenerationJob[] = [];
 
   for (const target of targets) {
     if (angleShots?.length) {
       for (const shot of angleShots) {
+        const angle = SHOOT_ANGLES.find((value) => value === shot.angleId);
+        const assignment = angle ? compositions?.[angle] : undefined;
         jobs.push({
           id: `${prefix}-${target.key}-${shot.angleId}`,
           targetKey: target.key,
@@ -64,6 +107,26 @@ export function buildGenerationJobs(options: {
           angleId: shot.angleId,
           prompt: shot.prompt,
           referenceImages: target.referenceImages,
+          ...(composition
+            ? buildCompositionRequest(
+                basePrompt,
+                target.referenceImages,
+                composition,
+                angle ?? singleAngle,
+              )
+            : {}),
+          ...(assignment && angle
+            ? {
+                ...buildCompositionRequest(
+                  basePrompt,
+                  target.referenceImages,
+                  assignment.template,
+                  angle,
+                  assignment.referenceAngle,
+                ),
+                aspectRatio: assignment.template.aspectRatio,
+              }
+            : {}),
         });
       }
       continue;
@@ -77,6 +140,9 @@ export function buildGenerationJobs(options: {
         angleId: null,
         prompt: basePrompt,
         referenceImages: target.referenceImages,
+        ...(composition
+          ? buildCompositionRequest(basePrompt, target.referenceImages, composition, singleAngle)
+          : {}),
       });
     }
   }

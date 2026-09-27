@@ -6,6 +6,7 @@ import { registerFileHandlers } from './files';
 import { registerEntityHandlers } from './entities';
 import { registerAdReferenceHandlers } from './adReferences';
 import { registerSavedPromptHandlers } from './savedPrompts';
+import { registerShootTemplateHandlers } from './shootTemplates';
 import { registerApiKeyHandlers } from './apiKeys';
 import { registerFacebookAdsHandlers } from './facebookAds';
 import { registerTelegramHandlers } from './telegram';
@@ -60,6 +61,7 @@ export function registerIpcHandlers(): void {
   registerEntityHandlers();
   registerAdReferenceHandlers();
   registerSavedPromptHandlers();
+  registerShootTemplateHandlers();
   registerApiKeyHandlers();
   registerFacebookAdsHandlers();
   registerTelegramHandlers();

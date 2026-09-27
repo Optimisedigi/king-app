@@ -5,7 +5,8 @@ import {
   CLOSE_UP_SOURCE_ANGLE_ID,
   CONSISTENCY_CLAUSE,
   buildAnglePrompt,
-} from '@/lib/productAngles';
+  buildAngleShots,
+} from '../../../src/renderer/src/lib/productAngles';
 
 describe('product angles', () => {
   it('defines a unique id and non-empty instruction for every angle', () => {
@@ -27,6 +28,16 @@ describe('product angles', () => {
 
   it('does not generate a close-up angle, since it is cropped instead', () => {
     expect(PRODUCT_ANGLES.some((angle) => angle.id === 'close-up')).toBe(false);
+  });
+});
+
+describe('template-aware angles', () => {
+  it('leaves template camera and framing assembly to the role-aware builder', () => {
+    expect(buildAngleShots('  Cake  ', true)).toEqual([
+      { angleId: 'eye-level', prompt: 'Cake' },
+      { angleId: 'elevated-45', prompt: 'Cake' },
+    ]);
+    expect(CLOSE_UP_SOURCE_ANGLE_ID).toBe('elevated-45');
   });
 });
 

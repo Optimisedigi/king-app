@@ -5,8 +5,9 @@ import {
   labelledPrompt,
   DEFAULT_TARGET_KEY,
   type GenerationTarget,
-} from '@/lib/generationJobs';
-import { buildAngleShots, PRODUCT_ANGLES } from '@/lib/productAngles';
+} from '../../../src/renderer/src/lib/generationJobs';
+import { buildAngleShots, PRODUCT_ANGLES } from '../../../src/renderer/src/lib/productAngles';
+import type { ShootTemplate } from '../../../src/shared/shootTemplates';
 
 const base = 'A chocolate cake on a brown backdrop';
 
@@ -124,6 +125,48 @@ describe('buildGenerationJobs', () => {
     expect(
       buildGenerationJobs({ basePrompt: base, targets: [], count: 3, idPrefix: 'test' }),
     ).toEqual([]);
+  });
+});
+
+describe('composition batch preflight', () => {
+  it('rejects the whole plan if a later target or required angle is invalid', () => {
+    const asset = 'local-file:///shoot-templates/11111111-1111-1111-1111-111111111111.png';
+    const composition: ShootTemplate = {
+      id: '22222222-2222-2222-2222-222222222222',
+      schemaVersion: 1,
+      revision: 1,
+      name: 'Studio',
+      aspectRatio: '1:1',
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+      angles: {
+        'eye-level': {
+          sourceUrl: asset,
+          referenceUrl: asset,
+          crop: { x: 0, y: 0, width: 1, height: 1 },
+          guides: { centreX: 0.5, baseY: 0.8, width: 0.6 },
+        },
+      },
+    };
+    const options = {
+      basePrompt: base,
+      count: 1,
+      aspectRatio: '1:1',
+      composition,
+      targets: [
+        target('a', 'Valid cake', ['a']),
+        target('b', 'Too many photos', Array(8).fill('b')),
+      ],
+    };
+    expect(() => buildGenerationJobs(options)).toThrow('Too many photos');
+    expect(() =>
+      buildGenerationJobs({
+        ...options,
+        targets: [target('a', 'Valid cake', ['a'])],
+        angleShots: buildAngleShots(base, true),
+      }),
+    ).toThrow('elevated-45');
+    expect(options.targets[1]?.referenceImages).toHaveLength(8);
   });
 });
 

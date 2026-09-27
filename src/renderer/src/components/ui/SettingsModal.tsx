@@ -3,14 +3,7 @@ import type { UpdaterStatus } from '@/types/electron';
 import type { PageType } from '@/App';
 import { CloseIcon, DownloadIcon, RefreshIcon } from '@/components/icons';
 import SelectDropdown from '@/components/ui/SelectDropdown';
-import { useModelStore, type ImageModel } from '@/stores/modelStore';
-
-const MODEL_OPTIONS: { value: ImageModel; label: string }[] = [
-  { value: 'nano_banana_pro', label: 'Nano Banana Pro' },
-  { value: 'gpt_image_2', label: 'GPT Image 2' },
-  { value: 'gpt_image_25_flare', label: 'GPT Image 2.5 Flare' },
-  { value: 'gpt_image_25_sunburst', label: 'GPT Image 2.5 Sunburst' },
-];
+import { MODEL_OPTIONS, useModelStore, type ImageModel } from '@/stores/modelStore';
 
 /** Short explanations of the controls that aren't self-evident. */
 const HOW_TO_ENTRIES = [

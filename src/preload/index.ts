@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
+import type { ShootTemplate, ShootTemplateDraft } from '../shared/shootTemplates';
 
 /** Mirror of `ImageModel` in `src/renderer/src/stores/modelStore.ts`. */
 type ImageModelId =
@@ -183,6 +184,21 @@ const api = {
     ) => ipcRenderer.invoke('entities:update', entityType, id, data),
     delete: (entityType: string, id: string) =>
       ipcRenderer.invoke('entities:delete', entityType, id),
+  },
+  shootTemplates: {
+    list: (): Promise<ShootTemplate[]> => ipcRenderer.invoke('shootTemplates:list'),
+    preview: (source: string): Promise<{ dataUrl: string; width: number; height: number }> =>
+      ipcRenderer.invoke('shootTemplates:preview', source),
+    get: (id: string): Promise<ShootTemplate | null> =>
+      ipcRenderer.invoke('shootTemplates:get', id),
+    create: (draft: ShootTemplateDraft): Promise<ShootTemplate> =>
+      ipcRenderer.invoke('shootTemplates:create', draft),
+    update: (id: string, revision: number, draft: ShootTemplateDraft): Promise<ShootTemplate> =>
+      ipcRenderer.invoke('shootTemplates:update', id, revision, draft),
+    archive: (id: string, revision: number): Promise<ShootTemplate> =>
+      ipcRenderer.invoke('shootTemplates:archive', id, revision),
+    preflight: (template: ShootTemplate): Promise<void> =>
+      ipcRenderer.invoke('shootTemplates:preflight', template),
   },
   savedPrompts: {
     list: () => ipcRenderer.invoke('savedPrompts:list'),

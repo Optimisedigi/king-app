@@ -39,6 +39,16 @@ export function getAdReferencesJsonPath(): string {
   return join(getDataDir(), 'ad-references.json');
 }
 
+export function getShootTemplatesDir(): string {
+  const dir = join(getImagesDir(), 'shoot-templates');
+  ensureDir(dir);
+  return dir;
+}
+
+export function getShootTemplatesJsonPath(): string {
+  return join(getDataDir(), 'shoot-templates.json');
+}
+
 export function getSavedPromptsJsonPath(): string {
   return join(getDataDir(), 'saved-prompts.json');
 }

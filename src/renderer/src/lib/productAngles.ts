@@ -1,10 +1,9 @@
 /**
  * Fixed camera angles for shooting one product from several viewpoints.
  *
- * Each angle is generated as its own request from the SAME reference photo —
- * never by chaining a generated image — so the product can't drift between
- * shots. Only the camera instruction changes; everything else in the prompt,
- * including `CONSISTENCY_CLAUSE`, is identical across the set.
+ * Each angle is generated independently from the original product references.
+ * References and instructions guide identity, but cannot guarantee consistency.
+ * Composition templates optionally supply a separate framing reference.
  *
  * The close-up is not in this list: it is cropped from a generated shot, which
  * guarantees an identical product instead of merely asking for one.
@@ -48,8 +47,8 @@ export const CLOSE_UP_LABEL = 'Close-up (cropped)';
 export const ANGLE_SET_SIZE = PRODUCT_ANGLES.length + 1;
 
 /**
- * Appended to every angle in a set. This is what actually keeps the product
- * identical between shots — the angle instructions only move the camera.
+ * Default guidance for an angle set without a composition template.
+ * This requests consistency; independent model calls may still vary.
  */
 export const CONSISTENCY_CLAUSE =
   'This is the exact same physical product as the reference image in every shot: ' +
@@ -70,16 +69,21 @@ export interface AngleShot {
 
 /**
  * Build the full prompt for one angle: the user's creative direction, then the
- * camera move, then the consistency lock.
+ * camera move, then consistency guidance.
  */
-export function buildAnglePrompt(basePrompt: string, angle: ProductAngle): string {
+export function buildAnglePrompt(
+  basePrompt: string,
+  angle: ProductAngle,
+  composition = false,
+): string {
+  if (composition) return basePrompt.trim(); // Template assembly supplies camera, identity and framing together.
   return `${basePrompt.trim()}\n\n${angle.instruction}\n\n${CONSISTENCY_CLAUSE}`;
 }
 
 /** Build the full ordered set of shots for one product photo. */
-export function buildAngleShots(basePrompt: string): AngleShot[] {
+export function buildAngleShots(basePrompt: string, composition = false): AngleShot[] {
   return PRODUCT_ANGLES.map((angle) => ({
     angleId: angle.id,
-    prompt: buildAnglePrompt(basePrompt, angle),
+    prompt: buildAnglePrompt(basePrompt, angle, composition),
   }));
 }

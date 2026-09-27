@@ -33,7 +33,17 @@ import HelpTip from '@/components/ui/HelpTip';
 import SavedPromptsMenu from '@/components/ui/SavedPromptsMenu';
 import type { GenerationTarget } from '@/lib/generationJobs';
 import type { EntityData, ImageModelId } from '@/types/electron';
-import { useModelStore } from '@/stores/modelStore';
+import { MODEL_OPTIONS, useModelStore } from '@/stores/modelStore';
+import { CompositionTemplatePicker } from '@/components/composition/CompositionTemplatePicker';
+import { useCompositionStore } from '@/stores/compositionStore';
+import { preflightComposition } from '@/lib/compositionPrompt';
+import {
+  resolveCompositionAssignments,
+  preflightCompositionAssignments,
+  templatesForPreflight,
+  type CompositionAssignments,
+} from '@/lib/compositionAssignments';
+import type { ShootAngle, ShootTemplate } from '../../../shared/shootTemplates';
 
 type ImageProvider = 'openai-api' | 'openai-oauth' | 'fal';
 
@@ -72,6 +82,9 @@ interface ImagePromptFormProps {
      * Each carries that product's own reference photos.
      */
     targets?: GenerationTarget[];
+    composition?: ShootTemplate;
+    compositions?: CompositionAssignments;
+    singleShotAngle?: ShootAngle;
   }) => void;
   initialPrompt?: string;
   recreateData?: { prompt: string } | null;
@@ -89,6 +102,19 @@ export default function ImagePromptForm({
   const [imageCount, setImageCount] = useState(1);
   const [angleSet, setAngleSet] = useState(false);
   const [aspectRatio, setAspectRatio] = useState('1:1');
+  const compositionState = useCompositionStore();
+  const composition = compositionState.templates.find(
+    (template) => !angleSet && template.id === compositionState.selectedId,
+  );
+  const usesComposition = angleSet
+    ? !!(
+        compositionState.angleSelections['eye-level'] ||
+        compositionState.angleSelections['elevated-45']
+      )
+    : !!compositionState.selectedId;
+  const effectiveAspect = composition?.aspectRatio ?? aspectRatio;
+  const [preflighting, setPreflighting] = useState(false);
+  const preflightRef = useRef(false);
   const [resolution, setResolution] = useState('high');
   const [outputFormat, setOutputFormat] = useState('png');
   const [provider, setProvider] = useState<ImageProvider>('openai-api');
@@ -97,7 +123,34 @@ export default function ImagePromptForm({
   useEffect(() => {
     providerRef.current = provider;
   }, [provider]);
-  const modelVariant = useModelStore((s) => s.selectedModel);
+  const selectedModel = useModelStore((s) => s.selectedModel);
+  const setSelectedModel = useModelStore((s) => s.setSelectedModel);
+  // Nano Banana is only available through fal.ai; OpenAI otherwise uses GPT Image 2.
+  const modelVariant =
+    provider !== 'fal' && selectedModel === 'nano_banana_pro' ? 'gpt_image_2' : selectedModel;
+  const modelChoices = availableProviders.flatMap((availableProvider) =>
+    MODEL_OPTIONS.filter(
+      (model) => availableProvider === 'fal' || model.value !== 'nano_banana_pro',
+    ).map((model) => ({
+      value: `${availableProvider}:${model.value}`,
+      label: model.label,
+      provider: availableProvider,
+      model: model.value,
+    })),
+  );
+  const modelOptions = availableProviders.flatMap((availableProvider) => [
+    {
+      value: `_${availableProvider}`,
+      label:
+        availableProvider === 'openai-api'
+          ? 'OpenAI API'
+          : availableProvider === 'openai-oauth'
+            ? 'OpenAI OAuth'
+            : 'fal.ai',
+      disabled: true,
+    },
+    ...modelChoices.filter((choice) => choice.provider === availableProvider),
+  ]);
 
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
   const [products, setProducts] = useState<EntityData[]>([]);
@@ -138,9 +191,14 @@ export default function ImagePromptForm({
         if (oauthStatus.connected) providers.push('openai-oauth');
         if (keys.fal) providers.push('fal');
         setAvailableProviders(providers);
-        // If current provider is no longer available, switch to the first.
-        if (providers.length > 0 && !providers.includes(providerRef.current)) {
-          setProvider(providers[0]!);
+        // Restore a compatible provider for the persisted Nano Banana selection.
+        if (
+          useModelStore.getState().selectedModel === 'nano_banana_pro' &&
+          providers.includes('fal')
+        ) {
+          setProvider('fal');
+        } else if (providers[0] && !providers.includes(providerRef.current)) {
+          setProvider(providers[0]);
         }
       } catch {
         /* silent */
@@ -189,7 +247,7 @@ export default function ImagePromptForm({
       if (!entity) return;
 
       const entityImages: ReferenceImage[] = entity.referenceImages
-        .slice(0, MAX_REFERENCE_IMAGES)
+        .slice(0, usesComposition ? entity.referenceImages.length : MAX_REFERENCE_IMAGES)
         .map((url) => ({
           id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
           preview: url,
@@ -199,7 +257,7 @@ export default function ImagePromptForm({
 
       setReferenceImages(entityImages);
     },
-    [products, characters],
+    [products, characters, usesComposition],
   );
 
   const autoResizeTextarea = useCallback(() => {
@@ -241,6 +299,11 @@ export default function ImagePromptForm({
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (!files) return;
+      if (usesComposition && referenceImages.length + files.length > 7) {
+        toast.error('Composition allows at most 7 product photos. No photos were added.');
+        e.target.value = '';
+        return;
+      }
 
       const validFiles: File[] = [];
       for (const file of Array.from(files)) {
@@ -276,7 +339,7 @@ export default function ImagePromptForm({
         reader.readAsDataURL(file);
       }
     },
-    [referenceImages.length],
+    [referenceImages.length, usesComposition],
   );
 
   const removeReferenceImage = useCallback((id: string) => {
@@ -289,9 +352,9 @@ export default function ImagePromptForm({
 
   const isImagesLoading = referenceImages.some((img) => img.isLoading);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    if (isImagesLoading) return;
+    if (isImagesLoading || preflightRef.current) return;
 
     if (!prompt.trim()) {
       toast.error('Type a prompt first.');
@@ -317,17 +380,73 @@ export default function ImagePromptForm({
 
     const batchTargets: GenerationTarget[] = isBatch
       ? products
-          .filter((p) => p.referenceImages.length > 0)
+          .filter((p) => usesComposition || p.referenceImages.length > 0)
           .map((p) => ({
             key: p.id,
             label: p.name,
-            referenceImages: p.referenceImages.slice(0, MAX_REFERENCE_IMAGES),
+            referenceImages: usesComposition
+              ? [...p.referenceImages]
+              : p.referenceImages.slice(0, MAX_REFERENCE_IMAGES),
           }))
       : [];
 
     if (isBatch && batchTargets.length === 0) {
       toast.error('None of your products have reference photos yet.');
       return;
+    }
+
+    const snapshot = composition ? structuredClone(composition) : undefined;
+    let compositions: CompositionAssignments | undefined;
+    if (
+      usesComposition &&
+      (!compositionState.loaded || compositionState.error || (!angleSet && !snapshot))
+    ) {
+      toast.error('Composition is unavailable. Retry compositions or select None.');
+      return;
+    }
+    if (usesComposition) {
+      preflightRef.current = true;
+      setPreflighting(true);
+      try {
+        const targets = isBatch
+          ? batchTargets
+          : [{ label: null, referenceImages: uploadedImageUrls }];
+        if (angleSet) {
+          compositions = resolveCompositionAssignments(
+            compositionState.templates,
+            compositionState.angleSelections,
+          );
+          if (compositions) {
+            preflightCompositionAssignments({
+              assignments: compositions,
+              targets,
+              basePrompt: resolvedPrompt,
+            });
+            for (const template of templatesForPreflight(compositions)) {
+              await window.api.shootTemplates.preflight(template);
+            }
+          }
+        } else if (snapshot) {
+          preflightComposition({
+            template: snapshot,
+            aspectRatio: effectiveAspect,
+            targets,
+            angles: [compositionState.singleShotAngle],
+            basePrompt: resolvedPrompt,
+          });
+          await window.api.shootTemplates.preflight(snapshot);
+        }
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : 'Composition references are unavailable. Reopen the editor and upload them again.',
+        );
+        return;
+      } finally {
+        preflightRef.current = false;
+        setPreflighting(false);
+      }
     }
 
     // A batch multiplies cost by the number of products, so confirm before
@@ -337,7 +456,9 @@ export default function ImagePromptForm({
       const total = batchTargets.length * perProduct;
       if (total > BATCH_CONFIRM_THRESHOLD) {
         const confirmed = window.confirm(
-          `This will generate ${total} images (${perProduct} for each of ${batchTargets.length} products) and bill your provider for every one. Continue?`,
+          angleSet
+            ? `This will make ${total} images for ${batchTargets.length} products: ${batchTargets.length * PRODUCT_ANGLES.length} paid generations plus ${batchTargets.length} local close-up crops. Continue?`
+            : `This will generate ${total} images (${perProduct} for each of ${batchTargets.length} products) and bill your provider for every one. Continue?`,
         );
         if (!confirmed) return;
       }
@@ -354,13 +475,15 @@ export default function ImagePromptForm({
       onSubmit?.({
         prompt: resolvedPrompt,
         count: PRODUCT_ANGLES.length,
-        aspectRatio,
+        aspectRatio: effectiveAspect,
+        compositions,
+        singleShotAngle: compositionState.singleShotAngle,
         resolution,
         outputFormat,
         referenceImages: uploadedImageUrls,
         provider,
         modelVariant,
-        angleShots: buildAngleShots(resolvedPrompt),
+        angleShots: buildAngleShots(resolvedPrompt, !!compositions),
         ...(isBatch ? { targets: batchTargets } : {}),
       });
       return;
@@ -369,7 +492,9 @@ export default function ImagePromptForm({
     onSubmit?.({
       prompt: resolvedPrompt,
       count: imageCount,
-      aspectRatio,
+      aspectRatio: effectiveAspect,
+      composition: snapshot,
+      singleShotAngle: compositionState.singleShotAngle,
       resolution,
       outputFormat,
       referenceImages: uploadedImageUrls,
@@ -394,7 +519,7 @@ export default function ImagePromptForm({
       onSubmit={handleSubmit}
       className="fixed inset-x-1/2 bottom-4 z-20 hidden w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[2rem] border border-[var(--base-color-brand--umber)]/30 bg-[var(--base-color-brand--champagne)] p-[22px] shadow-[0_12px_40px_-12px_rgba(51,32,26,0.25)] md:block lg:max-w-[1065px]"
     >
-      <fieldset className="relative z-20 flex gap-3">
+      <fieldset className="relative z-20 flex min-w-0 gap-3">
         {/* Left section */}
         <div className="min-h-0 min-w-0 flex-1 space-y-3">
           {/* Reference images preview */}
@@ -475,14 +600,13 @@ export default function ImagePromptForm({
                   }
                 }
               }}
-              className="hide-scrollbar max-h-[120px] min-h-[40px] w-full resize-none rounded-none border-none bg-transparent p-0 text-[15px] text-[var(--text-color--text-primary)] placeholder:text-[var(--base-color-brand--umber)]/70 focus:outline-none"
+              className="hide-scrollbar max-h-[120px] min-h-[40px] w-full min-w-0 resize-none rounded-none border-none bg-transparent p-0 text-[15px] text-[var(--text-color--text-primary)] placeholder:text-[var(--base-color-brand--umber)]/70 focus:outline-none"
             />
           </div>
 
-          {/* Controls row — a tight gap keeps every control, including the
-              file type, on one line at the panel's full width; it still wraps
-              rather than pushing the Generate button out on a narrow window. */}
+          {/* Keep Generate with the controls, wrapping when the panel is too narrow. */}
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <CompositionTemplatePicker angleSet={angleSet} />
             <SavedPromptsMenu
               currentPrompt={prompt}
               onUsePrompt={(saved) => {
@@ -495,19 +619,16 @@ export default function ImagePromptForm({
               text="Save wording you like, then load it again later. Pair a saved prompt with 'All products' to run the identical prompt across your whole catalogue."
             />
 
-            {availableProviders.length > 1 && (
+            {modelChoices.length > 0 && (
               <SelectDropdown
-                options={availableProviders.map((p) => ({
-                  value: p,
-                  label:
-                    p === 'openai-api'
-                      ? 'OpenAI API'
-                      : p === 'openai-oauth'
-                        ? 'OpenAI OAuth'
-                        : 'fal.ai',
-                }))}
-                value={provider}
-                onChange={(v) => setProvider(v as ImageProvider)}
+                options={modelOptions}
+                value={`${provider}:${modelVariant}`}
+                onChange={(value) => {
+                  const choice = modelChoices.find((option) => option.value === value);
+                  if (!choice) return;
+                  setProvider(choice.provider);
+                  setSelectedModel(choice.model);
+                }}
                 direction="up"
               />
             )}
@@ -539,7 +660,7 @@ export default function ImagePromptForm({
             </button>
             <HelpTip
               label="About the angle set"
-              text={`Turns one product photo into ${ANGLE_SET_SIZE} matching shots: ${PRODUCT_ANGLES.map((a) => a.label).join(' and ')}, plus a close-up cropped straight out of the 45° shot so the product is identical. Needs a reference photo.`}
+              text="Generates eye level and 45° above using their assigned compositions, then crops a close-up from the 45° result. Assignments are remembered for future runs and apply to every selected product. Results may vary."
             />
 
             {/* Image count selector — an angle set fixes its own count. */}
@@ -570,14 +691,25 @@ export default function ImagePromptForm({
               </button>
             </div>
 
-            <SelectDropdown
-              options={aspectRatioOptions}
-              value={aspectRatio}
-              onChange={setAspectRatio}
-              icon={aspectRatioIcons[aspectRatio] || <AutoIcon />}
-              showIcons
-              direction="up"
-            />
+            {usesComposition ? (
+              <span
+                className="px-2 text-xs"
+                title="Composition fixes the output aspect. Select None to change it."
+              >
+                {angleSet
+                  ? 'Aspect fixed per angle composition'
+                  : `${effectiveAspect} · Fixed by composition`}
+              </span>
+            ) : (
+              <SelectDropdown
+                options={aspectRatioOptions}
+                value={aspectRatio}
+                onChange={setAspectRatio}
+                icon={aspectRatioIcons[aspectRatio] || <AutoIcon />}
+                showIcons
+                direction="up"
+              />
+            )}
 
             <SelectDropdown
               options={qualityOptions}
@@ -594,27 +726,21 @@ export default function ImagePromptForm({
               icon={<FormatIcon />}
               direction="up"
             />
-          </div>
-        </div>
 
-        {/* Right section — Generate matches the 40px height of the dropdowns
-            it sits beside. */}
-        <aside className="flex shrink-0 items-end justify-end gap-3 self-end">
-          <button
-            type="submit"
-            disabled={isImagesLoading}
-            tabIndex={-1}
-            className="inline-grid h-10 w-28 grid-flow-col items-center justify-center gap-2 rounded-full border-none bg-[var(--base-color-brand--cinamon)] px-2.5 text-sm font-semibold tracking-wide text-[var(--base-color-brand--shell)] shadow-[0_4px_0_0_var(--base-color-brand--dark-red)] transition-all duration-150 hover:bg-[var(--base-color-brand--red)] focus:outline-none active:translate-y-0.5 active:shadow-[0_2px_0_0_var(--base-color-brand--dark-red)] disabled:cursor-not-allowed disabled:bg-[var(--base-color-brand--umber)] disabled:text-[var(--base-color-brand--shell)]/70 disabled:shadow-[0_4px_0_0_var(--base-color-brand--bean)]"
-            style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
-          >
-            <div className="flex items-center gap-2">
+            {/* Generate is part of the controls row and matches its 40px height. */}
+            <button
+              type="submit"
+              disabled={isImagesLoading || preflighting}
+              className="ml-auto inline-grid h-10 w-28 shrink-0 grid-flow-col items-center justify-center gap-2 rounded-full border-none bg-[var(--base-color-brand--cinamon)] px-2.5 text-sm font-semibold tracking-wide text-[var(--base-color-brand--shell)] shadow-[0_4px_0_0_var(--base-color-brand--dark-red)] transition-all duration-150 hover:bg-[var(--base-color-brand--red)] focus:outline-none active:translate-y-0.5 active:shadow-[0_2px_0_0_var(--base-color-brand--dark-red)] disabled:cursor-not-allowed disabled:bg-[var(--base-color-brand--umber)] disabled:text-[var(--base-color-brand--shell)]/70 disabled:shadow-[0_4px_0_0_var(--base-color-brand--bean)]"
+              style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
+            >
               <span className="text-[11px] font-semibold whitespace-nowrap">
-                {isImagesLoading ? 'Uploading...' : 'Generate'}
+                {preflighting ? 'Checking…' : isImagesLoading ? 'Uploading...' : 'Generate'}
               </span>
               <SparkleIcon />
-            </div>
-          </button>
-        </aside>
+            </button>
+          </div>
+        </div>
       </fieldset>
     </form>
   );
