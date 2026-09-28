@@ -1,4 +1,5 @@
 import type { ShootTemplate, ShootTemplateDraft } from '../../../shared/shootTemplates';
+import type { ProductFolder } from '../../../shared/productFolders';
 
 export type ImageModelId =
   | 'nano_banana_pro'
@@ -25,6 +26,9 @@ export interface EntityData {
   thumbnailUrl: string | null;
   createdAt: string;
   productType?: string;
+  folderId?: string | null;
+  pairedWith?: string;
+  originalFilenames?: string[];
 }
 
 /** A prompt the user saved to reuse across products. */
@@ -367,6 +371,23 @@ export interface ElectronAPI {
     }) => Promise<CustomAdReferenceData>;
     delete: (id: string) => Promise<{ success: boolean }>;
   };
+  productPairs: {
+    link: (
+      pairs: {
+        primaryId: string;
+        secondaryId: string;
+        primaryPhotos: string[];
+        secondaryPhotos: string[];
+      }[],
+    ) => Promise<void>;
+    unlink: (secondaryId: string) => Promise<void>;
+  };
+  productFolders: {
+    list: () => Promise<ProductFolder[]>;
+    create: (name: string) => Promise<ProductFolder>;
+    rename: (id: string, name: string) => Promise<ProductFolder>;
+    move: (productIds: string[], folderId: string | null) => Promise<void>;
+  };
   entities: {
     list: (entityType: string) => Promise<EntityData[]>;
     create: (
@@ -375,6 +396,7 @@ export interface ElectronAPI {
         name: string;
         files: { name: string; buffer: ArrayBuffer }[];
         productType?: string;
+        folderId?: string | null;
       },
     ) => Promise<EntityData>;
     update: (

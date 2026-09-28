@@ -16,6 +16,7 @@ export interface UploadedImage {
 
 interface UseEntityManagementOptions {
   entityType: EntityType;
+  folderId?: string | null;
 }
 
 interface UseEntityManagementReturn {
@@ -23,6 +24,7 @@ interface UseEntityManagementReturn {
   isLoading: boolean;
   isCreating: boolean;
   hasFetched: boolean;
+  error: string;
   editingEntity: EntityData | null;
   deleteEntityId: string | null;
   fetchEntities: () => Promise<void>;
@@ -42,20 +44,24 @@ interface UseEntityManagementReturn {
 
 export function useEntityManagement({
   entityType,
+  folderId,
 }: UseEntityManagementOptions): UseEntityManagementReturn {
   const [entities, setEntities] = useState<EntityData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasFetched, setHasFetched] = useState(false);
+  const [error, setError] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [editingEntity, setEditingEntity] = useState<EntityData | null>(null);
   const [deleteEntityId, setDeleteEntityId] = useState<string | null>(null);
 
-  const fetchEntities = useCallback(async () => {
+  const fetchEntities = useCallback(async (): Promise<void> => {
+    setIsLoading(true);
+    setError('');
     try {
       const data = await window.api.entities.list(entityType);
       setEntities(data);
     } catch {
-      // Silently fail - entities will show empty state
+      setError(`Could not load ${entityType}. Retry before making changes.`);
     } finally {
       setIsLoading(false);
       setHasFetched(true);
@@ -63,7 +69,7 @@ export function useEntityManagement({
   }, [entityType]);
 
   useEffect(() => {
-    fetchEntities();
+    void fetchEntities();
   }, [fetchEntities]);
 
   const handleCreate = useCallback(
@@ -87,7 +93,12 @@ export function useEntityManagement({
             })),
         );
 
-        await window.api.entities.create(entityType, { name, files, productType });
+        await window.api.entities.create(entityType, {
+          name,
+          files,
+          productType,
+          ...(entityType === 'products' ? { folderId: folderId ?? null } : {}),
+        });
         await fetchEntities();
       } catch {
         const label = entityType === 'products' ? 'product' : 'character';
@@ -97,7 +108,7 @@ export function useEntityManagement({
         setIsCreating(false);
       }
     },
-    [entityType, fetchEntities, entities],
+    [entityType, fetchEntities, entities, folderId],
   );
 
   /**
@@ -123,6 +134,7 @@ export function useEntityManagement({
             await window.api.entities.create(entityType, {
               name: item.name,
               files: [{ name: item.file.name, buffer: await item.file.arrayBuffer() }],
+              ...(entityType === 'products' ? { folderId: folderId ?? null } : {}),
             });
             created++;
           } catch {
@@ -136,7 +148,7 @@ export function useEntityManagement({
       }
       return { created, failed };
     },
-    [entityType, fetchEntities, entities],
+    [entityType, fetchEntities, entities, folderId],
   );
 
   const handleSaveEdit = useCallback(
@@ -210,6 +222,7 @@ export function useEntityManagement({
     isLoading,
     isCreating,
     hasFetched,
+    error,
     editingEntity,
     deleteEntityId,
     fetchEntities,

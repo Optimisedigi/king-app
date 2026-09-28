@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
+import type { ProductFolder } from '../shared/productFolders';
 import type { ShootTemplate, ShootTemplateDraft } from '../shared/shootTemplates';
 
 /** Mirror of `ImageModel` in `src/renderer/src/stores/modelStore.ts`. */
@@ -162,6 +163,27 @@ const api = {
       image: { filename: string; bytes: ArrayBuffer };
     }) => ipcRenderer.invoke('facebookAds:createAd', request),
   },
+  productPairs: {
+    link: (
+      pairs: {
+        primaryId: string;
+        secondaryId: string;
+        primaryPhotos: string[];
+        secondaryPhotos: string[];
+      }[],
+    ): Promise<void> => ipcRenderer.invoke('productPairs:link', pairs),
+    unlink: (secondaryId: string): Promise<void> =>
+      ipcRenderer.invoke('productPairs:unlink', secondaryId),
+  },
+  productFolders: {
+    list: (): Promise<ProductFolder[]> => ipcRenderer.invoke('productFolders:list'),
+    create: (name: string): Promise<ProductFolder> =>
+      ipcRenderer.invoke('productFolders:create', name),
+    rename: (id: string, name: string): Promise<ProductFolder> =>
+      ipcRenderer.invoke('productFolders:rename', id, name),
+    move: (productIds: string[], folderId: string | null): Promise<void> =>
+      ipcRenderer.invoke('productFolders:move', productIds, folderId),
+  },
   entities: {
     list: (entityType: string) => ipcRenderer.invoke('entities:list', entityType),
     create: (
@@ -170,6 +192,7 @@ const api = {
         name: string;
         files: { name: string; buffer: ArrayBuffer }[];
         productType?: string;
+        folderId?: string | null;
       },
     ) => ipcRenderer.invoke('entities:create', entityType, data),
     update: (

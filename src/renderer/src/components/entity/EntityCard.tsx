@@ -13,9 +13,16 @@ interface EntityCardProps {
   onGenerate: (id: string) => void;
   onEdit: (entity: EntityData) => void;
   onDelete: (id: string) => void;
+  selection?: { checked: boolean; disabled: boolean; onToggle: (id: string) => void };
 }
 
-export default memo(function EntityCard({ entity, onGenerate, onEdit, onDelete }: EntityCardProps) {
+export default memo(function EntityCard({
+  entity,
+  onGenerate,
+  onEdit,
+  onDelete,
+  selection,
+}: EntityCardProps) {
   const [isLoaded, setIsLoaded] = useState(false);
 
   const handleGenerate = useCallback(() => onGenerate(entity.id), [onGenerate, entity.id]);
@@ -100,6 +107,19 @@ export default memo(function EntityCard({ entity, onGenerate, onEdit, onDelete }
           </p>
         </div>
       </div>
+      {selection && (
+        <label className="flex min-h-10 cursor-pointer items-center gap-2 px-2 text-sm text-[var(--base-color-brand--bean)]">
+          <input
+            type="checkbox"
+            aria-label={`Select ${entity.name}`}
+            checked={selection.checked}
+            disabled={selection.disabled}
+            onChange={() => selection.onToggle(entity.id)}
+            className="size-4 accent-[var(--base-color-brand--bean)]"
+          />
+          Select
+        </label>
+      )}
     </div>
   );
 });

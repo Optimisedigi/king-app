@@ -20,7 +20,6 @@ export function CompositionTemplatePicker({ angleSet }: { angleSet: boolean }): 
     targetAngle?: ShootAngle;
     referenceAngle?: ShootAngle;
   } | null>(null);
-  const [error, setError] = useState('');
   const selected = state.templates.find((template) => template.id === state.selectedId);
   const references = state.templates
     .filter((template) => !template.archivedAt)
@@ -45,15 +44,6 @@ export function CompositionTemplatePicker({ angleSet }: { angleSet: boolean }): 
       state.select(template.id);
     }
     setEditing(null);
-  }
-  async function archive(): Promise<void> {
-    if (!selected) return;
-    try {
-      await window.api.shootTemplates.archive(selected.id, selected.revision);
-      await state.reload();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not archive.');
-    }
   }
   return (
     <>
@@ -192,15 +182,6 @@ export function CompositionTemplatePicker({ angleSet }: { angleSet: boolean }): 
               >
                 Edit composition
               </button>
-              <button
-                type="button"
-                className={button}
-                onClick={() => {
-                  void archive();
-                }}
-              >
-                Archive composition
-              </button>
               <label className={`${button} flex items-center gap-2`}>
                 Shot
                 <select
@@ -220,14 +201,13 @@ export function CompositionTemplatePicker({ angleSet }: { angleSet: boolean }): 
           )}
         </div>
       )}
-      {(state.error || error) && (
+      {state.error && (
         <p role="alert" className="w-full text-sm">
-          {state.error || error}{' '}
+          {state.error}{' '}
           <button
             type="button"
             className={button}
             onClick={() => {
-              setError('');
               void state.reload();
             }}
           >

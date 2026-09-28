@@ -40,19 +40,31 @@ describe('closeUpRegion', () => {
   it('crops a zoomed-in region, never the whole image', () => {
     const { size } = closeUpRegion(2000, 2000);
     expect(size).toBeLessThan(2000);
-    expect(size / 2000).toBeCloseTo(0.55, 2);
+    expect(size / 2000).toBeCloseTo(0.68, 2);
   });
 
-  it('centres the crop horizontally', () => {
-    const width = 2000;
-    const { x, size } = closeUpRegion(width, 1000);
-    expect(x).toBe(Math.round((width - size) / 2));
+  it('frames the front-left detail with room for the product side', () => {
+    for (const [width, height] of [
+      [2000, 1000],
+      [1024, 1024],
+      [1024, 1536],
+    ]) {
+      const { x, size } = closeUpRegion(width, height);
+      expect(x).toBe(Math.max(0, Math.round((width - size) / 2 - width * 0.16)));
+      expect(x + size / 2).toBeLessThan(width / 2);
+      expect(size).toBe(Math.round(Math.min(width, height) * 0.68));
+    }
   });
 
-  it('biases the crop above centre so surface detail stays in frame', () => {
+  it('clamps the left bias for one-pixel sources', () => {
+    expect(closeUpRegion(1, 1)).toEqual({ x: 0, y: 0, size: 1 });
+  });
+
+  it('biases the crop slightly below centre to include the product front', () => {
     const height = 2000;
     const { y, size } = closeUpRegion(2000, height);
-    expect(y).toBeLessThan(Math.round((height - size) / 2));
+    expect(y).toBe(Math.round((height - size) / 2 + height * 0.03));
+    expect(y).toBeGreaterThan(Math.round((height - size) / 2));
   });
 
   it('keeps the crop on-image for extreme aspect ratios', () => {

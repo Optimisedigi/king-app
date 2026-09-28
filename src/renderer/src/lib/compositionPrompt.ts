@@ -4,11 +4,12 @@ import {
   type ShootTemplate,
 } from '../../../shared/shootTemplates';
 
+import { ELEVATED_45_CAMERA } from './productAngles';
+
 export const COMPOSITION_CAMERAS: Record<ShootAngle, string> = {
   'eye-level':
     'Camera at eye level with the product, lens square to the front face and horizon level.',
-  'elevated-45':
-    'Camera raised to a 45-degree elevated angle looking down, showing the top surface and front side.',
+  'elevated-45': ELEVATED_45_CAMERA,
 };
 function percent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
@@ -34,7 +35,7 @@ export function buildCompositionRequest(
     );
   const { guides } = settings;
   const count = productReferences.length;
-  const roles = `${count === 1 ? 'Image 1 defines' : `Images 1–${count} define`} the product. Image ${count + 1} defines composition, camera framing, background, surface and light only. Do not copy its product, decoration, branding or text.`;
+  const roles = `${count === 1 ? 'Image 1 defines' : `Images 1–${count} define`} the product. Image ${count + 1} defines composition, camera framing, background, surface and light only. Do not copy its product, decoration, branding or text. Use all product photos as complementary views of one product. Follow the requested camera angle and composition reference for perspective, not the camera viewpoints in the product photos.`;
   const framing = `In the final ${template.aspectRatio} frame, place the product centre at X ${percent(guides.centreX)}, its base at Y ${percent(guides.baseY)} measured from the top, and its apparent width at ${percent(guides.width)} of frame width.${guides.boundaryY === undefined ? '' : ` Place the wall/table boundary at Y ${percent(guides.boundaryY)} measured from the top.`}`;
   const prompt = `${basePrompt.trim()}\n\n${roles}\n\n${COMPOSITION_CAMERAS[angle]} ${framing}\n\nRender a natural full scene using the composition image as the source of the background, surface and lighting, with consistent lighting and realistic contact shadows. Preserve the target product's true shape, proportions, colour, details, decoration, packaging, text and logos from the product photos. Do not restyle, add or remove product details. These are framing targets: never stretch or distort the product to fit a rectangle. Keep the entire product in frame. Composition guides are approximate, not a pixel lock.`;
   if (prompt.length > 32000)

@@ -16,6 +16,11 @@ export interface ProductAngle {
   instruction: string;
 }
 
+export const ELEVATED_45_CAMERA =
+  'Camera raised to a 45-degree elevated angle above the tabletop plane, halfway between eye level and directly overhead, aimed down at the product centre. ' +
+  'Show both the top surface and front face with consistent elevation across products, even when their heights or decorations differ. ' +
+  'Do not substitute an eye-level or overhead view. Product reference photos define identity, not camera elevation.';
+
 export const PRODUCT_ANGLES: ProductAngle[] = [
   {
     id: 'eye-level',
@@ -29,7 +34,8 @@ export const PRODUCT_ANGLES: ProductAngle[] = [
     id: 'elevated-45',
     label: '45° above',
     instruction:
-      'Camera raised to a 45-degree elevated angle looking down towards the product. ' +
+      ELEVATED_45_CAMERA +
+      ' ' +
       'Full product in frame, centred, with generous negative space around it, ' +
       'showing both the top surface and the front side of the product.',
   },

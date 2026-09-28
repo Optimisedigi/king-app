@@ -23,6 +23,9 @@ vi.mock('../../../src/main/services/atomicJson', () => ({
 }));
 
 vi.mock('fs', () => ({
+  readFileSync: vi.fn(() => JSON.stringify(mocks.fakeStore)),
+  copyFileSync: vi.fn(),
+  constants: { COPYFILE_EXCL: 1 },
   writeFileSync: vi.fn(),
   existsSync: vi.fn(),
   unlinkSync: vi.fn(),
@@ -66,9 +69,27 @@ describe('entityStore', () => {
   describe('listEntities', () => {
     it('returns sorted entities (newest first)', () => {
       setEntities([
-        { id: 'e1', name: 'Entity 1', referenceImages: [], thumbnailUrl: null, createdAt: '2024-01-01T00:00:00.000Z' },
-        { id: 'e2', name: 'Entity 2', referenceImages: [], thumbnailUrl: null, createdAt: '2024-06-01T00:00:00.000Z' },
-        { id: 'e3', name: 'Entity 3', referenceImages: [], thumbnailUrl: null, createdAt: '2024-03-01T00:00:00.000Z' },
+        {
+          id: 'e1',
+          name: 'Entity 1',
+          referenceImages: [],
+          thumbnailUrl: null,
+          createdAt: '2024-01-01T00:00:00.000Z',
+        },
+        {
+          id: 'e2',
+          name: 'Entity 2',
+          referenceImages: [],
+          thumbnailUrl: null,
+          createdAt: '2024-06-01T00:00:00.000Z',
+        },
+        {
+          id: 'e3',
+          name: 'Entity 3',
+          referenceImages: [],
+          thumbnailUrl: null,
+          createdAt: '2024-03-01T00:00:00.000Z',
+        },
       ]);
       const result = listEntities('products');
       expect(result.map((e) => e.id)).toEqual(['e2', 'e3', 'e1']);
@@ -83,7 +104,13 @@ describe('entityStore', () => {
   describe('getEntity', () => {
     it('finds entity by id', () => {
       setEntities([
-        { id: 'e1', name: 'Entity 1', referenceImages: [], thumbnailUrl: null, createdAt: '2024-01-01T00:00:00.000Z' },
+        {
+          id: 'e1',
+          name: 'Entity 1',
+          referenceImages: [],
+          thumbnailUrl: null,
+          createdAt: '2024-01-01T00:00:00.000Z',
+        },
       ]);
       const result = getEntity('products', 'e1');
       expect(result).toBeDefined();
@@ -98,8 +125,13 @@ describe('entityStore', () => {
 
   describe('addEntity', () => {
     it('creates entity with thumbnailUrl set to first image', async () => {
-      mockedRandomUUID.mockReturnValue('uuid-1234' as `${string}-${string}-${string}-${string}-${string}`);
-      const images = ['local-file:///entities/products/img1.png', 'local-file:///entities/products/img2.png'];
+      mockedRandomUUID.mockReturnValue(
+        'uuid-1234' as `${string}-${string}-${string}-${string}-${string}`,
+      );
+      const images = [
+        'local-file:///entities/products/img1.png',
+        'local-file:///entities/products/img2.png',
+      ];
       const result = await addEntity('products', 'My Product', images);
 
       expect(result.id).toBe('uuid-1234');
@@ -110,13 +142,17 @@ describe('entityStore', () => {
     });
 
     it('sets thumbnailUrl to null when no images provided', async () => {
-      mockedRandomUUID.mockReturnValue('uuid-5678' as `${string}-${string}-${string}-${string}-${string}`);
+      mockedRandomUUID.mockReturnValue(
+        'uuid-5678' as `${string}-${string}-${string}-${string}-${string}`,
+      );
       const result = await addEntity('products', 'Empty Product', []);
       expect(result.thumbnailUrl).toBeNull();
     });
 
     it('writes entity to store', async () => {
-      mockedRandomUUID.mockReturnValue('uuid-9999' as `${string}-${string}-${string}-${string}-${string}`);
+      mockedRandomUUID.mockReturnValue(
+        'uuid-9999' as `${string}-${string}-${string}-${string}-${string}`,
+      );
       await addEntity('products', 'Test', []);
 
       expect(writeJsonAtomic).toHaveBeenCalledOnce();
@@ -129,7 +165,13 @@ describe('entityStore', () => {
   describe('updateEntity', () => {
     it('updates name and images', async () => {
       setEntities([
-        { id: 'e1', name: 'Old Name', referenceImages: ['old-img.png'], thumbnailUrl: 'old-img.png', createdAt: '2024-01-01T00:00:00.000Z' },
+        {
+          id: 'e1',
+          name: 'Old Name',
+          referenceImages: ['old-img.png'],
+          thumbnailUrl: 'old-img.png',
+          createdAt: '2024-01-01T00:00:00.000Z',
+        },
       ]);
       const newImages = ['new-img1.png', 'new-img2.png'];
       const result = await updateEntity('products', 'e1', 'New Name', newImages);
@@ -150,7 +192,13 @@ describe('entityStore', () => {
 
     it('sets thumbnailUrl to null when images list is empty', async () => {
       setEntities([
-        { id: 'e1', name: 'Entity', referenceImages: ['img.png'], thumbnailUrl: 'img.png', createdAt: '2024-01-01T00:00:00.000Z' },
+        {
+          id: 'e1',
+          name: 'Entity',
+          referenceImages: ['img.png'],
+          thumbnailUrl: 'img.png',
+          createdAt: '2024-01-01T00:00:00.000Z',
+        },
       ]);
       const result = await updateEntity('products', 'e1', 'Entity', []);
       expect(result!.thumbnailUrl).toBeNull();
@@ -177,8 +225,12 @@ describe('entityStore', () => {
 
       expect(result).toBe(true);
       expect(mockedUnlinkSync).toHaveBeenCalledTimes(2);
-      expect(mockedUnlinkSync).toHaveBeenCalledWith('/mock/data/images/entities/products/file1.png');
-      expect(mockedUnlinkSync).toHaveBeenCalledWith('/mock/data/images/entities/products/file2.png');
+      expect(mockedUnlinkSync).toHaveBeenCalledWith(
+        '/mock/data/images/entities/products/file1.png',
+      );
+      expect(mockedUnlinkSync).toHaveBeenCalledWith(
+        '/mock/data/images/entities/products/file2.png',
+      );
 
       const written = writeJsonAtomic.mock.calls[0][1] as { entities: unknown[] };
       expect(written.entities).toHaveLength(0);
@@ -239,7 +291,9 @@ describe('entityStore', () => {
     });
 
     it('defaults to .png when file has no extension', () => {
-      mockedRandomUUID.mockReturnValue('uuid-noext' as `${string}-${string}-${string}-${string}-${string}`);
+      mockedRandomUUID.mockReturnValue(
+        'uuid-noext' as `${string}-${string}-${string}-${string}-${string}`,
+      );
       const files = [{ name: 'noext', buffer: Buffer.from('data') }];
       const urls = saveEntityImages('products', files);
       expect(urls[0]).toBe('local-file:///entities/products/uuid-noext.png');

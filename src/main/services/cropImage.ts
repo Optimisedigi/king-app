@@ -12,9 +12,11 @@ import { nativeImage } from 'electron';
  */
 
 /** Fraction of the source's shorter edge used for the close-up crop. */
-const CLOSE_UP_SCALE = 0.55;
-/** How far above centre to bias the crop, as a fraction of source height. */
-const CLOSE_UP_VERTICAL_BIAS = 0.08;
+const CLOSE_UP_SCALE = 0.68;
+/** How far left of centre to bias the crop, as a fraction of source width. */
+const CLOSE_UP_HORIZONTAL_BIAS = 0.16;
+/** How far below centre to bias the crop, keeping the front side in frame. */
+const CLOSE_UP_VERTICAL_BIAS = 0.03;
 
 export interface CropRegion {
   x: number;
@@ -23,14 +25,14 @@ export interface CropRegion {
 }
 
 /**
- * Square region for a close-up: horizontally centred, biased above centre so a
- * product standing on a surface keeps its detail in frame rather than the
- * empty foreground. Always stays inside the source bounds.
+ * Square close-up biased left and slightly below centre to show both top detail
+ * and the product's front-left side. Always stays inside the source bounds.
  */
 export function closeUpRegion(width: number, height: number): CropRegion {
   const size = Math.max(1, Math.round(Math.min(width, height) * CLOSE_UP_SCALE));
-  const x = Math.round((width - size) / 2);
-  const biased = Math.round((height - size) / 2 - height * CLOSE_UP_VERTICAL_BIAS);
+  const leftBiased = Math.round((width - size) / 2 - width * CLOSE_UP_HORIZONTAL_BIAS);
+  const x = Math.min(Math.max(0, leftBiased), width - size);
+  const biased = Math.round((height - size) / 2 + height * CLOSE_UP_VERTICAL_BIAS);
   const y = Math.min(Math.max(0, biased), height - size);
   return { x, y, size };
 }

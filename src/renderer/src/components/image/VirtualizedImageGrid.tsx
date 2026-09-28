@@ -264,7 +264,7 @@ function GridList({ ref, style, children, ...props }: RefProps) {
     <div
       ref={ref}
       {...props}
-      className="grid-cols-2 sm:grid-cols-3 md:grid-cols-4"
+      className="grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
       style={{
         display: 'grid',
         gap: '6px',

@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import SelectDropdown from '@/components/ui/SelectDropdown';
+import { ProductReferencePicker } from '@/components/image/ProductReferencePicker';
+import { collectProductReferences } from '@/lib/productReferences';
 import {
   PRODUCT_ANGLES,
   ANGLE_SET_SIZE,
@@ -33,6 +35,13 @@ import HelpTip from '@/components/ui/HelpTip';
 import SavedPromptsMenu from '@/components/ui/SavedPromptsMenu';
 import type { GenerationTarget } from '@/lib/generationJobs';
 import type { EntityData, ImageModelId } from '@/types/electron';
+import type { ProductFolder } from '../../../shared/productFolders';
+import {
+  ALL_PRODUCTS_VALUE,
+  UNFILED_PRODUCTS_VALUE,
+  isProductBatch,
+  snapshotProductFolderTargets,
+} from '@/lib/productFolderTargets';
 import { MODEL_OPTIONS, useModelStore } from '@/stores/modelStore';
 import { CompositionTemplatePicker } from '@/components/composition/CompositionTemplatePicker';
 import { useCompositionStore } from '@/stores/compositionStore';
@@ -46,9 +55,6 @@ import {
 import type { ShootAngle, ShootTemplate } from '../../../shared/shootTemplates';
 
 type ImageProvider = 'openai-api' | 'openai-oauth' | 'fal';
-
-/** Entity-selector value meaning "run this across every saved product". */
-const ALL_PRODUCTS_VALUE = 'product:all';
 
 /** Above this many images, a batch asks for confirmation before spending. */
 const BATCH_CONFIRM_THRESHOLD = 12;
@@ -99,6 +105,8 @@ export default function ImagePromptForm({
 }: ImagePromptFormProps) {
   const [prompt, setPrompt] = useState(initialPrompt);
   const [selectedEntity, setSelectedEntity] = useState('none');
+  const [selectedProductEntries, setSelectedProductEntries] = useState<string[]>([]);
+  const selectedReferenceUrls = useRef<Set<string>>(new Set());
   const [imageCount, setImageCount] = useState(1);
   const [angleSet, setAngleSet] = useState(false);
   const [aspectRatio, setAspectRatio] = useState('1:1');
@@ -155,6 +163,19 @@ export default function ImagePromptForm({
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
   const [products, setProducts] = useState<EntityData[]>([]);
   const [characters, setCharacters] = useState<EntityData[]>([]);
+  const [folders, setFolders] = useState<ProductFolder[]>([]);
+  const [folderError, setFolderError] = useState<string | null>(null);
+  const [foldersLoading, setFoldersLoading] = useState(true);
+  const loadFolders = useCallback(async () => {
+    try {
+      setFolders(await window.api.productFolders.list());
+      setFolderError(null);
+    } catch {
+      setFolderError('Could not load product folders. Retry to refresh folder choices.');
+    } finally {
+      setFoldersLoading(false);
+    }
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const maxImages = MAX_IMAGES_PER_GENERATION;
@@ -174,7 +195,8 @@ export default function ImagePromptForm({
       }
     };
     fetchEntities();
-  }, []);
+    void loadFolders();
+  }, [loadFolders]);
 
   // Detect available image providers.
   useEffect(() => {
@@ -213,12 +235,30 @@ export default function ImagePromptForm({
   // every saved product, each with its own reference photos.
   const entityOptions = [
     { value: 'none', label: 'Default' },
-    ...(products.length > 0
+    ...(products.length > 0 || selectedEntity === ALL_PRODUCTS_VALUE
       ? [
           { value: '_product_header', label: 'Products', disabled: true },
-          { value: ALL_PRODUCTS_VALUE, label: `All products (${products.length})` },
-          ...products.map((p) => ({ value: `product:${p.id}`, label: p.name })),
+          {
+            value: ALL_PRODUCTS_VALUE,
+            label: `All products (${products.filter((p) => !p.pairedWith).length} groups; ${products.length} entries)`,
+          },
+          ...products.map((p) => ({ value: `product:${p.id}`, label: `Product: ${p.name}` })),
         ]
+      : []),
+    { value: '_folder_header', label: 'Product folders', disabled: true },
+    {
+      value: UNFILED_PRODUCTS_VALUE,
+      label: `Unfiled products (${products.filter((p) => !p.pairedWith && (p.folderId === null || p.folderId === undefined)).length})`,
+    },
+    ...folders.map((folder) => ({
+      value: `folder:${folder.id}`,
+      label: `Folder: ${folder.name} (${products.filter((p) => !p.pairedWith && p.folderId === folder.id).length})${folderError ? ' · unavailable' : ''}`,
+      disabled: !!folderError,
+    })),
+    ...(selectedEntity.startsWith('folder:') &&
+    selectedEntity !== UNFILED_PRODUCTS_VALUE &&
+    !folders.some((folder) => `folder:${folder.id}` === selectedEntity)
+      ? [{ value: selectedEntity, label: 'Folder unavailable · refresh folders', disabled: true }]
       : []),
     ...(characters.length > 0
       ? [
@@ -231,11 +271,13 @@ export default function ImagePromptForm({
   // When an entity is selected, load its reference images
   const handleEntityChange = useCallback(
     (value: string) => {
+      selectedReferenceUrls.current = new Set();
+      setSelectedProductEntries([]);
       setSelectedEntity(value);
 
       // A batch run pulls each product's own photos at submit time, so there
       // is no single set to preview here.
-      if (value === 'none' || value === ALL_PRODUCTS_VALUE) {
+      if (value === 'none' || isProductBatch(value)) {
         setReferenceImages([]);
         return;
       }
@@ -245,9 +287,25 @@ export default function ImagePromptForm({
       const entity = entities.find((e) => e.id === id);
 
       if (!entity) return;
-
-      const entityImages: ReferenceImage[] = entity.referenceImages
-        .slice(0, usesComposition ? entity.referenceImages.length : MAX_REFERENCE_IMAGES)
+      const primary =
+        type === 'product' && entity.pairedWith
+          ? products.find((product) => product.id === entity.pairedWith)
+          : entity;
+      if (!primary) return;
+      const secondary =
+        type === 'product'
+          ? products.find((product) => product.pairedWith === primary.id)
+          : undefined;
+      const referenceUrls = secondary
+        ? collectProductReferences(products, [primary.id, secondary.id])
+        : primary.referenceImages;
+      if (secondary) {
+        setSelectedEntity(`product:${primary.id}`);
+        setSelectedProductEntries([`product:${primary.id}`, `product:${secondary.id}`]);
+        selectedReferenceUrls.current = new Set(referenceUrls);
+      }
+      const entityImages: ReferenceImage[] = referenceUrls
+        .slice(0, usesComposition ? referenceUrls.length : MAX_REFERENCE_IMAGES)
         .map((url) => ({
           id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
           preview: url,
@@ -272,10 +330,72 @@ export default function ImagePromptForm({
     autoResizeTextarea();
   }, [prompt, autoResizeTextarea]);
 
+  function toggleProductReference(value: string): void {
+    const product = products.find((entry) => `product:${entry.id}` === value);
+    const primaryId = product?.pairedWith ?? product?.id;
+    const secondary = products.find((entry) => entry.pairedWith === primaryId);
+    const linked =
+      product && primaryId && secondary && !selectedProductEntries.length
+        ? [`product:${primaryId}`, `product:${secondary.id}`]
+        : [value];
+    const next = selectedProductEntries.includes(value)
+      ? selectedProductEntries.filter((entry) => entry !== value)
+      : [...new Set([...selectedProductEntries, ...linked])];
+    try {
+      const urls = collectProductReferences(
+        products,
+        next.map((entry) => entry.slice('product:'.length)),
+      );
+      const previousUrls = selectedReferenceUrls.current;
+      const extras =
+        selectedProductEntries.length || selectedEntity === 'none'
+          ? referenceImages.filter((image) => !image.url || !previousUrls.has(image.url))
+          : [];
+      const existing = new Map(
+        referenceImages.filter((image) => image.url).map((image) => [image.url, image]),
+      );
+      const extraUrls = new Set(extras.map((image) => image.url));
+      const merged = [
+        ...urls
+          .filter((url) => !extraUrls.has(url))
+          .map(
+            (url) =>
+              existing.get(url) ?? { id: crypto.randomUUID(), preview: url, url, isLoading: false },
+          ),
+        ...extras,
+      ];
+      if (merged.length > MAX_REFERENCE_IMAGES)
+        throw new Error(
+          `Use at most ${MAX_REFERENCE_IMAGES} reference photos. This entry was not added.`,
+        );
+      selectedReferenceUrls.current = new Set(urls.filter((url) => !extraUrls.has(url)));
+      setReferenceImages(merged);
+      setSelectedProductEntries(next);
+      setSelectedEntity(next[0] ?? 'none');
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : 'Could not select these product references.',
+      );
+    }
+  }
+
+  async function refreshChoices(): Promise<void> {
+    setFoldersLoading(true);
+    await loadFolders();
+    try {
+      setProducts(await window.api.entities.list('products'));
+    } catch {
+      toast.error('Could not refresh products. Your current reference selection was kept.');
+    }
+  }
+
   // Handle recreate data
   useEffect(() => {
     if (recreateData) {
       setPrompt(recreateData.prompt);
+      selectedReferenceUrls.current = new Set();
+      setSelectedProductEntries([]);
+      setSelectedEntity('none');
       setReferenceImages([]);
     }
   }, [recreateData]);
@@ -285,6 +405,9 @@ export default function ImagePromptForm({
     if (!editData?.imageUrl) return;
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setPrompt('');
+    selectedReferenceUrls.current = new Set();
+    setSelectedProductEntries([]);
+    setSelectedEntity('none');
     setReferenceImages([
       {
         id,
@@ -367,7 +490,7 @@ export default function ImagePromptForm({
 
     // A batch run turns every saved product into its own target, carrying that
     // product's reference photos.
-    const isBatch = selectedEntity === ALL_PRODUCTS_VALUE;
+    const isBatch = isProductBatch(selectedEntity);
 
     // A batch spans many product types, so there is no single one to
     // substitute into the prompt.
@@ -376,26 +499,113 @@ export default function ImagePromptForm({
       const id = selectedEntity.slice('product:'.length);
       selectedProductType = products.find((p) => p.id === id)?.productType;
     }
-    const resolvedPrompt = renderPrompt(prompt, selectedProductType);
-
-    const batchTargets: GenerationTarget[] = isBatch
-      ? products
-          .filter((p) => usesComposition || p.referenceImages.length > 0)
-          .map((p) => ({
-            key: p.id,
-            label: p.name,
-            referenceImages: usesComposition
-              ? [...p.referenceImages]
-              : p.referenceImages.slice(0, MAX_REFERENCE_IMAGES),
-          }))
-      : [];
-
-    if (isBatch && batchTargets.length === 0) {
-      toast.error('None of your products have reference photos yet.');
+    const resolvedPrompt = [
+      renderPrompt(prompt, selectedProductType),
+      ...(selectedProductEntries.length > 1
+        ? [
+            'The selected product reference photos are complementary views of one and the same product. Generate a single product, preserving its details across views. These photos do not define the output camera angle.',
+          ]
+        : []),
+    ].join('\n\n');
+    if (
+      selectedProductEntries.length > 1 &&
+      (angleSet
+        ? buildAngleShots(resolvedPrompt, usesComposition).map((shot) => shot.prompt)
+        : [resolvedPrompt]
+      ).some((text) => text.length > 32000)
+    ) {
+      toast.error(
+        'The combined reference prompt is too long. Shorten your prompt before generating.',
+      );
       return;
     }
 
     const snapshot = composition ? structuredClone(composition) : undefined;
+    if (selectedProductEntries.length) {
+      const selectedSavedUrls = [...selectedReferenceUrls.current];
+      const maxReferences = usesComposition ? 7 : MAX_REFERENCE_IMAGES;
+      if (uploadedImageUrls.length > maxReferences) {
+        toast.error(
+          `Selected references contain ${uploadedImageUrls.length} photos. Use at most ${maxReferences}${usesComposition ? ' product photos plus the composition reference' : ' reference photos'}. No images were queued.`,
+        );
+        return;
+      }
+      preflightRef.current = true;
+      setPreflighting(true);
+      try {
+        const freshProducts = await window.api.entities.list('products');
+        const available = new Set(
+          collectProductReferences(
+            freshProducts,
+            selectedProductEntries.map((entry) => entry.slice('product:'.length)),
+          ),
+        );
+        if (
+          selectedSavedUrls.some((url) => uploadedImageUrls.includes(url) && !available.has(url))
+        ) {
+          throw new Error(
+            'Selected product photos have changed. Refresh choices, then untick and reselect those entries before generating.',
+          );
+        }
+      } catch (cause) {
+        toast.error(
+          cause instanceof Error
+            ? cause.message
+            : 'Could not validate the selected product entries. Retry before generating.',
+        );
+        return;
+      } finally {
+        preflightRef.current = false;
+        setPreflighting(false);
+      }
+    }
+    let batchTargets: GenerationTarget[] = [];
+    let batchScope = 'All products';
+    let hasPairedTargets = false;
+    if (isBatch) {
+      preflightRef.current = true;
+      setPreflighting(true);
+      try {
+        // Folder membership must be fresh before any preflight or paid work.
+        // All products does not depend on folder availability.
+        const [freshProducts, freshFolders] = await Promise.all([
+          window.api.entities.list('products'),
+          selectedEntity.startsWith('folder:')
+            ? window.api.productFolders.list()
+            : Promise.resolve(folders),
+        ]).catch(() => {
+          throw new Error(
+            'Could not refresh products or folders. Retry Generate; no generation was started.',
+          );
+        });
+        setProducts(freshProducts);
+        if (selectedEntity.startsWith('folder:')) {
+          setFolders(freshFolders);
+          setFolderError(null);
+        }
+        const batch = snapshotProductFolderTargets(
+          selectedEntity,
+          freshProducts,
+          freshFolders,
+          usesComposition,
+        );
+        batchTargets = batch.targets;
+        batchScope = batch.scope;
+        const targetIds = new Set(batchTargets.map((target) => target.key));
+        hasPairedTargets = freshProducts.some(
+          (product) => product.pairedWith && targetIds.has(product.pairedWith),
+        );
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : 'Could not refresh this batch. Retry Generate.',
+        );
+        return;
+      } finally {
+        preflightRef.current = false;
+        setPreflighting(false);
+      }
+    }
+
     let compositions: CompositionAssignments | undefined;
     if (
       usesComposition &&
@@ -454,11 +664,11 @@ export default function ImagePromptForm({
     if (isBatch) {
       const perProduct = angleSet ? ANGLE_SET_SIZE : imageCount;
       const total = batchTargets.length * perProduct;
-      if (total > BATCH_CONFIRM_THRESHOLD) {
+      if (total > BATCH_CONFIRM_THRESHOLD || hasPairedTargets) {
         const confirmed = window.confirm(
           angleSet
-            ? `This will make ${total} images for ${batchTargets.length} products: ${batchTargets.length * PRODUCT_ANGLES.length} paid generations plus ${batchTargets.length} local close-up crops. Continue?`
-            : `This will generate ${total} images (${perProduct} for each of ${batchTargets.length} products) and bill your provider for every one. Continue?`,
+            ? `${batchScope}: This will make ${total} images for ${batchTargets.length} products: ${batchTargets.length * PRODUCT_ANGLES.length} paid generations plus ${batchTargets.length} local close-up crops. Continue?`
+            : `${batchScope}: This will generate ${total} images (${perProduct} for each of ${batchTargets.length} products) and bill your provider for every one. Continue?`,
         );
         if (!confirmed) return;
       }
@@ -604,134 +814,159 @@ export default function ImagePromptForm({
             />
           </div>
 
-          {/* Keep Generate with the controls, wrapping when the panel is too narrow. */}
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <CompositionTemplatePicker angleSet={angleSet} />
-            <SavedPromptsMenu
-              currentPrompt={prompt}
-              onUsePrompt={(saved) => {
-                setPrompt(saved);
-                autoResizeTextarea();
-              }}
-            />
-            <HelpTip
-              label="About saved prompts"
-              text="Save wording you like, then load it again later. Pair a saved prompt with 'All products' to run the identical prompt across your whole catalogue."
-            />
-
-            {modelChoices.length > 0 && (
-              <SelectDropdown
-                options={modelOptions}
-                value={`${provider}:${modelVariant}`}
-                onChange={(value) => {
-                  const choice = modelChoices.find((option) => option.value === value);
-                  if (!choice) return;
-                  setProvider(choice.provider);
-                  setSelectedModel(choice.model);
+          <CompositionTemplatePicker angleSet={angleSet} />
+          {/* Reserve space for Generate beside the final row of wrapping controls. */}
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <SavedPromptsMenu
+                currentPrompt={prompt}
+                onUsePrompt={(saved) => {
+                  setPrompt(saved);
+                  autoResizeTextarea();
                 }}
-                direction="up"
               />
-            )}
+              <HelpTip
+                label="About saved prompts"
+                text="Save wording you like, then load it again later. Pair a saved prompt with 'All products' to run the identical prompt across your whole catalogue."
+              />
 
-            <SelectDropdown
-              options={entityOptions}
-              value={selectedEntity}
-              onChange={handleEntityChange}
-              direction="up"
-            />
-            <HelpTip
-              label="About the product selector"
-              text="Pick a saved product to use its reference photos automatically. Choose 'All products' to run this same prompt once for every product you've saved."
-            />
+              {modelChoices.length > 0 && (
+                <SelectDropdown
+                  options={modelOptions}
+                  value={`${provider}:${modelVariant}`}
+                  onChange={(value) => {
+                    const choice = modelChoices.find((option) => option.value === value);
+                    if (!choice) return;
+                    setProvider(choice.provider);
+                    setSelectedModel(choice.model);
+                  }}
+                  direction="up"
+                />
+              )}
 
-            {/* Angle set — one shot per camera angle, all from the same photo. */}
-            <button
-              type="button"
-              onClick={() => setAngleSet((prev) => !prev)}
-              aria-pressed={angleSet}
-              title={`Generate ${ANGLE_SET_SIZE} shots of the same product: ${PRODUCT_ANGLES.map((a) => a.label).join(', ')}, plus a close-up cropped from the 45° shot`}
-              className={`flex h-10 shrink-0 items-center rounded-full border px-3 text-[11px] font-semibold whitespace-nowrap transition-colors ${
-                angleSet
-                  ? 'border-[var(--base-color-brand--bean)] bg-[var(--base-color-brand--bean)] text-[var(--base-color-brand--shell)]'
-                  : 'border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] text-[var(--base-color-brand--bean)] hover:text-[var(--base-color-brand--cinamon)]'
-              }`}
-            >
-              {ANGLE_SET_SIZE} angles
-            </button>
-            <HelpTip
-              label="About the angle set"
-              text="Generates eye level and 45° above using their assigned compositions, then crops a close-up from the 45° result. Assignments are remembered for future runs and apply to every selected product. Results may vary."
-            />
-
-            {/* Image count selector — an angle set fixes its own count. */}
-            <div
-              className={`flex h-10 items-center gap-1 rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] px-3 ${
-                angleSet ? 'pointer-events-none opacity-40' : ''
-              }`}
-            >
+              <ProductReferencePicker
+                options={entityOptions}
+                value={selectedEntity}
+                selectedProducts={selectedProductEntries}
+                onScopeChange={handleEntityChange}
+                onToggleProduct={toggleProductReference}
+              />
               <button
                 type="button"
-                onClick={decrementCount}
-                disabled={angleSet || imageCount <= 1}
-                className="text-[var(--base-color-brand--bean)] transition-colors hover:text-[var(--base-color-brand--cinamon)] disabled:opacity-40 disabled:hover:text-[var(--base-color-brand--bean)]"
+                onClick={() => {
+                  void refreshChoices();
+                }}
+                disabled={foldersLoading}
+                className="px-2 text-xs underline disabled:opacity-40"
+                title={folderError ?? 'Refresh product folder choices'}
               >
-                <MinusIcon />
+                {foldersLoading
+                  ? 'Loading folders…'
+                  : folderError
+                    ? 'Retry folders'
+                    : 'Refresh choices'}
               </button>
-              <span className="w-8 text-center text-[11px] font-semibold text-[var(--base-color-brand--bean)]">
-                {angleSet ? ANGLE_SET_SIZE : imageCount}
-                <span className="text-[var(--base-color-brand--umber)]">/{maxImages}</span>
-              </span>
+              {folderError && (
+                <span role="status" className="text-xs">
+                  {folderError}
+                </span>
+              )}
+              <HelpTip
+                label="About the product selector"
+                text="Tick entries to combine their photos for one product. Approve suggested pairs on the Products page so folder and All products batches use both views; unpaired entries remain separate. Use up to 7 product photos with a composition, or 8 without one."
+              />
+
+              {/* Angle set — one shot per camera angle, all from the same photo. */}
               <button
                 type="button"
-                onClick={incrementCount}
-                disabled={angleSet || imageCount >= maxImages}
-                className="text-[var(--base-color-brand--bean)] transition-colors hover:text-[var(--base-color-brand--cinamon)] disabled:opacity-40 disabled:hover:text-[var(--base-color-brand--bean)]"
+                onClick={() => setAngleSet((prev) => !prev)}
+                aria-pressed={angleSet}
+                title={`Generate ${ANGLE_SET_SIZE} shots of the same product: ${PRODUCT_ANGLES.map((a) => a.label).join(', ')}, plus a close-up cropped from the 45° shot`}
+                className={`flex h-10 shrink-0 items-center rounded-full border px-3 text-[11px] font-semibold whitespace-nowrap transition-colors ${
+                  angleSet
+                    ? 'border-[var(--base-color-brand--bean)] bg-[var(--base-color-brand--bean)] text-[var(--base-color-brand--shell)]'
+                    : 'border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] text-[var(--base-color-brand--bean)] hover:text-[var(--base-color-brand--cinamon)]'
+                }`}
               >
-                <PlusIcon />
+                {ANGLE_SET_SIZE} angles
               </button>
-            </div>
+              <HelpTip
+                label="About the angle set"
+                text="Generates eye level and 45° above using their assigned compositions, then crops a left-side close-up from the 45° result. Assignments are remembered for future runs and apply to every selected product. Results may vary."
+              />
 
-            {usesComposition ? (
-              <span
-                className="px-2 text-xs"
-                title="Composition fixes the output aspect. Select None to change it."
+              {/* Image count selector — an angle set fixes its own count. */}
+              <div
+                title={
+                  isProductBatch(selectedEntity) ? 'Images per product (minimum 1)' : 'Image count'
+                }
+                className={`flex h-10 items-center gap-1 rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] px-3 ${
+                  angleSet ? 'pointer-events-none opacity-40' : ''
+                }`}
               >
-                {angleSet
-                  ? 'Aspect fixed per angle composition'
-                  : `${effectiveAspect} · Fixed by composition`}
-              </span>
-            ) : (
+                <button
+                  type="button"
+                  onClick={decrementCount}
+                  disabled={angleSet || imageCount <= 1}
+                  className="text-[var(--base-color-brand--bean)] transition-colors hover:text-[var(--base-color-brand--cinamon)] disabled:opacity-40 disabled:hover:text-[var(--base-color-brand--bean)]"
+                >
+                  <MinusIcon />
+                </button>
+                <span className="w-8 text-center text-[11px] font-semibold text-[var(--base-color-brand--bean)]">
+                  {angleSet ? ANGLE_SET_SIZE : imageCount}
+                  <span className="text-[var(--base-color-brand--umber)]">/{maxImages}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={incrementCount}
+                  disabled={angleSet || imageCount >= maxImages}
+                  className="text-[var(--base-color-brand--bean)] transition-colors hover:text-[var(--base-color-brand--cinamon)] disabled:opacity-40 disabled:hover:text-[var(--base-color-brand--bean)]"
+                >
+                  <PlusIcon />
+                </button>
+              </div>
+
+              {usesComposition ? (
+                <span
+                  className="px-2 text-xs"
+                  title="Composition fixes the output aspect. Select None to change it."
+                >
+                  {angleSet
+                    ? 'Aspect fixed per angle composition'
+                    : `${effectiveAspect} · Fixed by composition`}
+                </span>
+              ) : (
+                <SelectDropdown
+                  options={aspectRatioOptions}
+                  value={aspectRatio}
+                  onChange={setAspectRatio}
+                  icon={aspectRatioIcons[aspectRatio] || <AutoIcon />}
+                  showIcons
+                  direction="up"
+                />
+              )}
+
               <SelectDropdown
-                options={aspectRatioOptions}
-                value={aspectRatio}
-                onChange={setAspectRatio}
-                icon={aspectRatioIcons[aspectRatio] || <AutoIcon />}
-                showIcons
+                options={qualityOptions}
+                value={resolution}
+                onChange={setResolution}
+                icon={<ResolutionIcon />}
                 direction="up"
               />
-            )}
 
-            <SelectDropdown
-              options={qualityOptions}
-              value={resolution}
-              onChange={setResolution}
-              icon={<ResolutionIcon />}
-              direction="up"
-            />
-
-            <SelectDropdown
-              options={outputFormatOptions}
-              value={outputFormat}
-              onChange={setOutputFormat}
-              icon={<FormatIcon />}
-              direction="up"
-            />
-
-            {/* Generate is part of the controls row and matches its 40px height. */}
+              <SelectDropdown
+                options={outputFormatOptions}
+                value={outputFormat}
+                onChange={setOutputFormat}
+                icon={<FormatIcon />}
+                direction="up"
+              />
+            </div>
+            {/* Generate stays alongside the controls and matches their 40px height. */}
             <button
               type="submit"
               disabled={isImagesLoading || preflighting}
-              className="ml-auto inline-grid h-10 w-28 shrink-0 grid-flow-col items-center justify-center gap-2 rounded-full border-none bg-[var(--base-color-brand--cinamon)] px-2.5 text-sm font-semibold tracking-wide text-[var(--base-color-brand--shell)] shadow-[0_4px_0_0_var(--base-color-brand--dark-red)] transition-all duration-150 hover:bg-[var(--base-color-brand--red)] focus:outline-none active:translate-y-0.5 active:shadow-[0_2px_0_0_var(--base-color-brand--dark-red)] disabled:cursor-not-allowed disabled:bg-[var(--base-color-brand--umber)] disabled:text-[var(--base-color-brand--shell)]/70 disabled:shadow-[0_4px_0_0_var(--base-color-brand--bean)]"
+              className="inline-grid h-10 w-28 shrink-0 grid-flow-col items-center justify-center gap-2 rounded-full border-none bg-[var(--base-color-brand--cinamon)] px-2.5 text-sm font-semibold tracking-wide text-[var(--base-color-brand--shell)] shadow-[0_4px_0_0_var(--base-color-brand--dark-red)] transition-[background-color,box-shadow,transform] duration-150 hover:bg-[var(--base-color-brand--red)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--base-color-brand--bean)] active:translate-y-0.5 active:shadow-[0_2px_0_0_var(--base-color-brand--dark-red)] disabled:cursor-not-allowed disabled:bg-[var(--base-color-brand--umber)] disabled:text-[var(--base-color-brand--shell)]/70 disabled:shadow-[0_4px_0_0_var(--base-color-brand--bean)]"
               style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
             >
               <span className="text-[11px] font-semibold whitespace-nowrap">
