@@ -19,6 +19,9 @@ export interface ProductAngle {
 export const ELEVATED_45_CAMERA =
   'Camera raised to a 45-degree elevated angle above the tabletop plane, halfway between eye level and directly overhead, aimed down at the product centre. ' +
   'Show both the top surface and front face with consistent elevation across products, even when their heights or decorations differ. ' +
+  'Shoot from a slightly off-axis side position rather than straight on or directly overhead. ' +
+  'If the wall/table boundary is visible, let it recede gently downward toward the right as in an oblique tabletop perspective, rather than running flat across the frame; if a composition reference shows a different boundary, follow that reference instead. ' +
+  'Keep the product and tabletop physically level; create the diagonal through camera position, not a tilted product or sloping surface. ' +
   'Do not substitute an eye-level or overhead view. Product reference photos define identity, not camera elevation.';
 
 export const PRODUCT_ANGLES: ProductAngle[] = [

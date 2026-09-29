@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   PRODUCT_ANGLES,
+  ELEVATED_45_CAMERA,
   ANGLE_SET_SIZE,
   CLOSE_UP_SOURCE_ANGLE_ID,
   CONSISTENCY_CLAUSE,
   buildAnglePrompt,
   buildAngleShots,
 } from '../../../src/renderer/src/lib/productAngles';
+import { COMPOSITION_CAMERAS } from '../../../src/renderer/src/lib/compositionPrompt';
 
 describe('product angles', () => {
   it('defines a unique id and non-empty instruction for every angle', () => {
@@ -28,6 +30,19 @@ describe('product angles', () => {
 
   it('does not generate a close-up angle, since it is cropped instead', () => {
     expect(PRODUCT_ANGLES.some((angle) => angle.id === 'close-up')).toBe(false);
+  });
+
+  it('asks for an oblique tabletop perspective only in the elevated shot', () => {
+    const elevated = PRODUCT_ANGLES.find((angle) => angle.id === 'elevated-45');
+    const eyeLevel = PRODUCT_ANGLES.find((angle) => angle.id === 'eye-level');
+    expect(elevated?.instruction).toContain('slightly off-axis side position');
+    expect(elevated?.instruction).toContain('boundary is visible');
+    expect(elevated?.instruction).toContain('downward toward the right');
+    expect(elevated?.instruction).toContain('Keep the product and tabletop physically level');
+    expect(elevated?.instruction).toContain('follow that reference instead');
+    expect(eyeLevel?.instruction).not.toContain('downward toward the right');
+    expect(COMPOSITION_CAMERAS['elevated-45']).toBe(ELEVATED_45_CAMERA);
+    expect(ELEVATED_45_CAMERA).toContain('downward toward the right');
   });
 });
 
