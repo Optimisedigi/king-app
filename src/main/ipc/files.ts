@@ -1,5 +1,5 @@
 import { dialog, BrowserWindow, app } from 'electron';
-import { writeFileSync, readFileSync } from 'fs';
+import { writeFileSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import log from 'electron-log/main';
 import { resolveLocalFileUrl } from '../services/paths';
@@ -78,7 +78,10 @@ export function registerFileHandlers(): void {
     const directory = filePaths?.[0];
     if (!directory) return { success: false as const, cancelled: true, exported: 0, failed: 0 };
 
-    const used = new Set<string>();
+    // Exports are named after the user's original photos, so the folder may
+    // already hold those originals. Treat every existing name as taken so an
+    // export is numbered ("Cake-2.png") instead of overwriting a file.
+    const used = new Set<string>(readdirSync(directory).map((name) => name.toLowerCase()));
     let exported = 0;
     let failed = 0;
 
@@ -97,7 +100,8 @@ export function registerFileHandlers(): void {
 
         const stem = safeFileStem(typeof item.name === 'string' ? item.name : '');
         const target = join(directory, uniqueFilename(stem, extensionFor(item.filename), used));
-        writeFileSync(target, readFileSync(localPath));
+        // 'wx' fails rather than overwrite a file created since the folder was read.
+        writeFileSync(target, readFileSync(localPath), { flag: 'wx' });
         exported++;
       } catch (error) {
         log.error('[files:exportBatch] failed to export an image', {

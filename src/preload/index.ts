@@ -13,12 +13,18 @@ type ImageModelId =
 const api = {
   images: {
     list: (cursor?: string, limit?: number) => ipcRenderer.invoke('images:list', cursor, limit),
-    save: (data: { url: string; prompt: string; aspectRatio: string; model?: ImageModelId }) =>
-      ipcRenderer.invoke('images:save', data),
+    save: (data: {
+      url: string;
+      prompt: string;
+      aspectRatio: string;
+      model?: ImageModelId;
+      sourceName?: string;
+    }) => ipcRenderer.invoke('images:save', data),
     cropCloseUp: (localUrl: string) => ipcRenderer.invoke('images:cropCloseUp', localUrl),
     preview: (id: string) => ipcRenderer.invoke('images:preview', id),
-    approvedLabel: () => ipcRenderer.invoke('images:approvedLabel'),
-    removeApprovedLabel: () => ipcRenderer.invoke('images:removeApprovedLabel'),
+    approvedLabels: () => ipcRenderer.invoke('images:approvedLabels'),
+    removeApprovedLabel: (id: string) => ipcRenderer.invoke('images:removeApprovedLabel', id),
+    restoreApprovedLabel: (id: string) => ipcRenderer.invoke('images:restoreApprovedLabel', id),
     saveApprovedLabel: (dataUrl: string) => ipcRenderer.invoke('images:saveApprovedLabel', dataUrl),
     delete: (id: string) => ipcRenderer.invoke('images:delete', id),
   },

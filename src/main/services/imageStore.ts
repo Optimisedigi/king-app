@@ -22,6 +22,11 @@ export interface StoredImage {
    * back to a sensible default for legacy entries.
    */
   model?: ImageModel;
+  /**
+   * Original name of the photo this was generated from, so a bulk export can
+   * use it. Absent on older records and on images with no source photo.
+   */
+  sourceName?: string;
 }
 
 interface ImageStore {

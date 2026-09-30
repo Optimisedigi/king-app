@@ -123,8 +123,8 @@ export function ProductReferencePicker({
             }}
           >
             <p id={`${listId}-help`} className="px-2 pb-2 text-xs">
-              Tick entries showing the same product to combine their reference photos. All products
-              and folders generate separate sets.
+              Pick a folder to make one image per product in it. Tick entries only to combine their
+              photos into one image.
             </p>
             <div
               id={listId}

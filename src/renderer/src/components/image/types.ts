@@ -9,4 +9,6 @@ export interface GeneratedImage {
   createdAt: string;
   /** Absent on legacy records — detail panel falls back to Nano Banana Pro. */
   model?: ImageModelId;
+  /** Original name of the photo this was made from; used to name exports. */
+  sourceName?: string;
 }

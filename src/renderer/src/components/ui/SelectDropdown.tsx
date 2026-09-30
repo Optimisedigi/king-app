@@ -62,6 +62,7 @@ export default memo(function SelectDropdown({
       <button
         type="button"
         onClick={handleToggle}
+        aria-expanded={isOpen}
         className={`flex shrink-0 items-center justify-between gap-2 rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] text-[var(--text-color--text-primary)] transition hover:border-[var(--base-color-brand--bean)] ${size === 'sm' ? 'h-6 px-3 text-[10px]' : 'h-10 px-4 text-[11px]'} ${fullWidth ? 'w-full' : ''}`}
       >
         <div className="flex items-center gap-2">

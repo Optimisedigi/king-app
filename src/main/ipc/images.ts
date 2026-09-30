@@ -2,9 +2,10 @@ import { randomUUID } from 'crypto';
 import { stat } from 'fs/promises';
 import { nativeImage } from 'electron';
 import {
-  readApprovedLabel,
+  listApprovedLabels,
   saveApprovedLabel,
   removeApprovedLabel,
+  restoreApprovedLabel,
 } from '../services/approvedLabelStore';
 import {
   listImages,
@@ -27,8 +28,19 @@ export function registerImageHandlers(): void {
     'images:save',
     async (
       _event,
-      data: { url: string; prompt: string; aspectRatio: string; model?: ImageModel },
+      data: {
+        url: string;
+        prompt: string;
+        aspectRatio: string;
+        model?: ImageModel;
+        sourceName?: unknown;
+      },
     ) => {
+      // Display/export label only; the export sanitises it into a safe file name.
+      const sourceName =
+        typeof data.sourceName === 'string' && data.sourceName.trim()
+          ? data.sourceName.trim().slice(0, 255)
+          : undefined;
       const { filename, localUrl } = await downloadAndSaveImage(data.url);
       const image = await addImage({
         id: randomUUID(),
@@ -38,6 +50,7 @@ export function registerImageHandlers(): void {
         createdAt: new Date().toISOString(),
         filename,
         model: data.model,
+        ...(sourceName ? { sourceName } : {}),
       });
       return image;
     },
@@ -69,8 +82,15 @@ export function registerImageHandlers(): void {
     return bitmap.toDataURL();
   });
 
-  secureHandle('images:approvedLabel', async () => readApprovedLabel());
-  secureHandle('images:removeApprovedLabel', async () => removeApprovedLabel());
+  secureHandle('images:approvedLabels', async () => listApprovedLabels());
+  secureHandle('images:removeApprovedLabel', async (_event, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('Unknown saved label.');
+    await removeApprovedLabel(id);
+  });
+  secureHandle('images:restoreApprovedLabel', async (_event, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('Unknown saved label.');
+    await restoreApprovedLabel(id);
+  });
   secureHandle('images:saveApprovedLabel', async (_event, dataUrl: string) => {
     if (typeof dataUrl !== 'string' || dataUrl.length > 6_000_000)
       throw new Error('The label is too large.');
@@ -78,7 +98,7 @@ export function registerImageHandlers(): void {
     const { width, height } = decoded.getSize();
     if (!width || !height || width > 4096 || height > 4096)
       throw new Error('Choose a valid PNG label.');
-    await saveApprovedLabel(dataUrl);
+    return saveApprovedLabel(dataUrl);
   });
 
   secureHandle('images:delete', async (_event, id: string) => {

@@ -73,6 +73,35 @@ describe('buildGenerationJobs', () => {
     expect(jobs.every((j) => j.targetLabel === null)).toBe(true);
   });
 
+  it('carries each product source name onto its own jobs, angle sets included', () => {
+    const targets = [
+      { ...target('p1', 'Cake', ['cake.png']), sourceName: 'IMG_1 cake' },
+      target('p2', 'Tart', ['tart.png']),
+    ];
+    const single = buildGenerationJobs({ basePrompt: base, targets, count: 2, idPrefix: 'test' });
+    expect(single.map((j) => j.sourceName)).toEqual([
+      'IMG_1 cake',
+      'IMG_1 cake',
+      undefined,
+      undefined,
+    ]);
+    const angles = buildGenerationJobs({
+      basePrompt: base,
+      targets,
+      count: 1,
+      angleShots: buildAngleShots(base),
+      idPrefix: 'test',
+    });
+    expect(
+      angles.filter((j) => j.targetKey === 'p1').every((j) => j.sourceName === 'IMG_1 cake'),
+    ).toBe(true);
+    expect(angles.filter((j) => j.targetKey === 'p2').every((j) => !('sourceName' in j))).toBe(
+      true,
+    );
+    expect(defaultTarget(['a.png'], 'Wedding').sourceName).toBe('Wedding');
+    expect('sourceName' in defaultTarget(['a.png'])).toBe(false);
+  });
+
   it('sends each product only its own reference photos', () => {
     const jobs = buildGenerationJobs({
       basePrompt: base,

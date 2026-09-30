@@ -17,6 +17,8 @@ export interface GeneratedImageData {
   filename: string;
   /** Which fal model produced this image. Absent on legacy records. */
   model?: ImageModelId;
+  /** Original name of the photo this was made from; used to name exports. */
+  sourceName?: string;
 }
 
 export interface EntityData {
@@ -189,6 +191,8 @@ export interface ElectronAPI {
       prompt: string;
       aspectRatio: string;
       model?: ImageModelId;
+      /** Original photo name, kept so exports can use it. */
+      sourceName?: string;
     }) => Promise<GeneratedImageData>;
     /**
      * Crop a close-up from an already-saved image, given its `local-file://`
@@ -196,9 +200,11 @@ export interface ElectronAPI {
      */
     cropCloseUp: (localUrl: string) => Promise<{ success: boolean; dataUrl?: string }>;
     preview: (id: string) => Promise<string>;
-    approvedLabel: () => Promise<string | null>;
-    removeApprovedLabel: () => Promise<void>;
-    saveApprovedLabel: (dataUrl: string) => Promise<void>;
+    /** Saved label library, oldest first. */
+    approvedLabels: () => Promise<Array<{ id: string; dataUrl: string }>>;
+    removeApprovedLabel: (id: string) => Promise<void>;
+    restoreApprovedLabel: (id: string) => Promise<void>;
+    saveApprovedLabel: (dataUrl: string) => Promise<{ id: string; dataUrl: string }>;
     delete: (id: string) => Promise<{ success: boolean }>;
   };
   generate: {

@@ -21,6 +21,8 @@ export interface GenerationTarget {
   /** Product name, or null when the run isn't tied to a saved product. */
   label: string | null;
   referenceImages: string[];
+  /** Original photo name the results are exported under, when known. */
+  sourceName?: string;
 }
 
 export interface GenerationJob {
@@ -34,13 +36,20 @@ export interface GenerationJob {
   referenceImages: string[];
   /** Fixed output aspect for a per-angle composition assignment. */
   aspectRatio?: ShootTemplate['aspectRatio'];
+  /** Original photo name the result is exported under, when known. */
+  sourceName?: string;
 }
 
 /** The single unnamed target used when the run isn't a product batch. */
 export const DEFAULT_TARGET_KEY = 'default';
 
-export function defaultTarget(referenceImages: string[]): GenerationTarget {
-  return { key: DEFAULT_TARGET_KEY, label: null, referenceImages };
+export function defaultTarget(referenceImages: string[], sourceName?: string): GenerationTarget {
+  return {
+    key: DEFAULT_TARGET_KEY,
+    label: null,
+    referenceImages,
+    ...(sourceName ? { sourceName } : {}),
+  };
 }
 
 /**
@@ -96,6 +105,7 @@ export function buildGenerationJobs(options: {
   const jobs: GenerationJob[] = [];
 
   for (const target of targets) {
+    const source = target.sourceName ? { sourceName: target.sourceName } : {};
     if (angleShots?.length) {
       for (const shot of angleShots) {
         const angle = SHOOT_ANGLES.find((value) => value === shot.angleId);
@@ -107,6 +117,7 @@ export function buildGenerationJobs(options: {
           angleId: shot.angleId,
           prompt: shot.prompt,
           referenceImages: target.referenceImages,
+          ...source,
           ...(composition
             ? buildCompositionRequest(
                 basePrompt,
@@ -140,6 +151,7 @@ export function buildGenerationJobs(options: {
         angleId: null,
         prompt: basePrompt,
         referenceImages: target.referenceImages,
+        ...source,
         ...(composition
           ? buildCompositionRequest(basePrompt, target.referenceImages, composition, singleAngle)
           : {}),

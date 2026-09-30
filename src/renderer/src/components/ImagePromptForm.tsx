@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import SelectDropdown from '@/components/ui/SelectDropdown';
 import { ProductReferencePicker } from '@/components/image/ProductReferencePicker';
 import { collectProductReferences } from '@/lib/productReferences';
+import { isGenericClipboardName, sourceNameForReferences } from '@/lib/sourceNames';
 import {
   PRODUCT_ANGLES,
   ANGLE_SET_SIZE,
@@ -31,7 +32,7 @@ import {
   SUPPORTED_IMAGE_MIME_REGEX,
 } from '@/lib/constants/image-form';
 import { renderPrompt } from '@/lib/productTypes';
-import HelpTip from '@/components/ui/HelpTip';
+import { Hint } from '@/components/ui/Hint';
 import SavedPromptsMenu from '@/components/ui/SavedPromptsMenu';
 import type { GenerationTarget } from '@/lib/generationJobs';
 import type { EntityData, ImageModelId } from '@/types/electron';
@@ -65,6 +66,8 @@ interface ReferenceImage {
   preview: string;
   url?: string;
   isLoading: boolean;
+  /** Original file name of a photo added here, so exports can keep it. */
+  fileName?: string;
 }
 
 interface ImagePromptFormProps {
@@ -91,10 +94,12 @@ interface ImagePromptFormProps {
     composition?: ShootTemplate;
     compositions?: CompositionAssignments;
     singleShotAngle?: ShootAngle;
+    /** Original photo name for a single (non-batch) run's results. */
+    sourceName?: string;
   }) => void;
   initialPrompt?: string;
   recreateData?: { prompt: string } | null;
-  editData?: { imageUrl: string } | null;
+  editData?: { imageUrl: string; sourceName?: string } | null;
 }
 
 export default function ImagePromptForm({
@@ -105,6 +110,10 @@ export default function ImagePromptForm({
 }: ImagePromptFormProps) {
   const [prompt, setPrompt] = useState(initialPrompt);
   const [selectedEntity, setSelectedEntity] = useState('none');
+  // Each product folder remembers its own composition, e.g. one per cake size.
+  useEffect(() => {
+    useCompositionStore.getState().enterScope(selectedEntity);
+  }, [selectedEntity]);
   const [selectedProductEntries, setSelectedProductEntries] = useState<string[]>([]);
   const selectedReferenceUrls = useRef<Set<string>>(new Set());
   const [imageCount, setImageCount] = useState(1);
@@ -231,34 +240,53 @@ export default function ImagePromptForm({
     };
   }, []);
 
-  // Build entity selector options. `product:all` runs the same prompt over
-  // every saved product, each with its own reference photos.
-  const entityOptions = [
-    { value: 'none', label: 'Default' },
-    ...(products.length > 0 || selectedEntity === ALL_PRODUCTS_VALUE
-      ? [
-          { value: '_product_header', label: 'Products', disabled: true },
-          {
-            value: ALL_PRODUCTS_VALUE,
-            label: `All products (${products.filter((p) => !p.pairedWith).length} groups; ${products.length} entries)`,
-          },
-          ...products.map((p) => ({ value: `product:${p.id}`, label: `Product: ${p.name}` })),
-        ]
-      : []),
-    { value: '_folder_header', label: 'Product folders', disabled: true },
+  // Build entity selector options. `product:all` and folders run the same
+  // prompt over each product, with its own photos, one image per product.
+  // Folders sit directly under "All products" so a folder batch is easy to find;
+  // individual entries, which combine into a single image, come last.
+  const productGroupCount = (inFolder: (product: EntityData) => boolean): string => {
+    const count = products.filter((p) => !p.pairedWith && inFolder(p)).length;
+    return `${count} ${count === 1 ? 'product' : 'products'}, one image each`;
+  };
+  const folderOptions = [
+    { value: '_folder_header', label: 'Product folders · one image per product', disabled: true },
     {
       value: UNFILED_PRODUCTS_VALUE,
-      label: `Unfiled products (${products.filter((p) => !p.pairedWith && (p.folderId === null || p.folderId === undefined)).length})`,
+      label: `Unfiled products — ${productGroupCount((p) => p.folderId === null || p.folderId === undefined)}`,
     },
     ...folders.map((folder) => ({
       value: `folder:${folder.id}`,
-      label: `Folder: ${folder.name} (${products.filter((p) => !p.pairedWith && p.folderId === folder.id).length})${folderError ? ' · unavailable' : ''}`,
+      label: `Folder: ${folder.name} — ${productGroupCount((p) => p.folderId === folder.id)}${folderError ? ' · unavailable' : ''}`,
       disabled: !!folderError,
     })),
     ...(selectedEntity.startsWith('folder:') &&
     selectedEntity !== UNFILED_PRODUCTS_VALUE &&
     !folders.some((folder) => `folder:${folder.id}` === selectedEntity)
       ? [{ value: selectedEntity, label: 'Folder unavailable · refresh folders', disabled: true }]
+      : []),
+  ];
+  const hasProducts = products.length > 0 || selectedEntity === ALL_PRODUCTS_VALUE;
+  const entityOptions = [
+    { value: 'none', label: 'Default' },
+    ...(hasProducts
+      ? [
+          { value: '_product_header', label: 'Products', disabled: true },
+          {
+            value: ALL_PRODUCTS_VALUE,
+            label: `All products — ${productGroupCount(() => true)}`,
+          },
+        ]
+      : []),
+    ...folderOptions,
+    ...(hasProducts
+      ? [
+          {
+            value: '_entry_header',
+            label: 'Tick entries to combine their photos into one image',
+            disabled: true,
+          },
+          ...products.map((p) => ({ value: `product:${p.id}`, label: `Product: ${p.name}` })),
+        ]
       : []),
     ...(characters.length > 0
       ? [
@@ -414,26 +442,31 @@ export default function ImagePromptForm({
         preview: editData.imageUrl,
         url: editData.imageUrl,
         isLoading: false,
+        ...(editData.sourceName ? { fileName: editData.sourceName } : {}),
       },
     ]);
   }, [editData]);
 
-  const handleFileSelect = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (!files) return;
+  /** Add photos picked with the button, dropped, or pasted into the prompt box. */
+  const addReferenceFiles = useCallback(
+    (files: readonly File[], { fromClipboard = false } = {}) => {
+      if (!files.length) return;
       if (usesComposition && referenceImages.length + files.length > 7) {
         toast.error('Composition allows at most 7 product photos. No photos were added.');
-        e.target.value = '';
         return;
       }
 
       const validFiles: File[] = [];
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         if (!SUPPORTED_IMAGE_MIME_REGEX.test(file.type)) continue;
         if (file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024) continue;
         if (referenceImages.length + validFiles.length >= MAX_REFERENCE_IMAGES) break;
         validFiles.push(file);
+      }
+      if (validFiles.length < files.length) {
+        toast.error(
+          `Some photos were skipped. Use PNG, JPG or WebP under ${MAX_IMAGE_SIZE_MB} MB, up to ${MAX_REFERENCE_IMAGES} photos.`,
+        );
       }
 
       const pendingImages: ReferenceImage[] = validFiles.map((file) => ({
@@ -444,7 +477,6 @@ export default function ImagePromptForm({
       }));
 
       setReferenceImages((prev) => [...prev, ...pendingImages].slice(0, MAX_REFERENCE_IMAGES));
-      e.target.value = '';
 
       // Convert files to base64 data URLs so they're accessible from the main process
       for (let i = 0; i < validFiles.length; i++) {
@@ -456,7 +488,19 @@ export default function ImagePromptForm({
         reader.onload = () => {
           const dataUrl = reader.result as string;
           setReferenceImages((prev) =>
-            prev.map((img) => (img.id === id ? { ...img, url: dataUrl, isLoading: false } : img)),
+            prev.map((img) =>
+              img.id === id
+                ? {
+                    ...img,
+                    url: dataUrl,
+                    isLoading: false,
+                    // A copied screenshot arrives as "image.png"; don't name exports after that.
+                    ...(fromClipboard && isGenericClipboardName(file.name)
+                      ? {}
+                      : { fileName: file.name }),
+                  }
+                : img,
+            ),
           );
         };
         reader.readAsDataURL(file);
@@ -464,6 +508,30 @@ export default function ImagePromptForm({
     },
     [referenceImages.length, usesComposition],
   );
+
+  const handleFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      e.target.value = '';
+      addReferenceFiles(files);
+    },
+    [addReferenceFiles],
+  );
+
+  /** Paste copied photos (from Finder or elsewhere) into the prompt box. Text pastes normally. */
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const files = Array.from(e.clipboardData.files);
+      if (!files.length) return;
+      e.preventDefault();
+      addReferenceFiles(files, { fromClipboard: true });
+    },
+    [addReferenceFiles],
+  );
+
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  /** Only react to drags that carry files, not dragged text or gallery images. */
+  const hasFiles = (e: React.DragEvent): boolean => e.dataTransfer.types.includes('Files');
 
   const removeReferenceImage = useCallback((id: string) => {
     setReferenceImages((prev) => {
@@ -487,6 +555,15 @@ export default function ImagePromptForm({
     const uploadedImageUrls = referenceImages
       .filter((img) => img.url)
       .map((img) => img.url as string);
+    // Name each result after the photo it came from, for exports.
+    const addedFileNames = new Map(
+      referenceImages.flatMap((img) => (img.url && img.fileName ? [[img.url, img.fileName]] : [])),
+    );
+    const singleSourceName = sourceNameForReferences(
+      uploadedImageUrls,
+      [...products, ...characters],
+      addedFileNames,
+    );
 
     // A batch run turns every saved product into its own target, carrying that
     // product's reference photos.
@@ -589,7 +666,10 @@ export default function ImagePromptForm({
           freshFolders,
           usesComposition,
         );
-        batchTargets = batch.targets;
+        batchTargets = batch.targets.map((target) => {
+          const sourceName = sourceNameForReferences(target.referenceImages, freshProducts);
+          return sourceName ? { ...target, sourceName } : target;
+        });
         batchScope = batch.scope;
         const targetIds = new Set(batchTargets.map((target) => target.key));
         hasPairedTargets = freshProducts.some(
@@ -695,6 +775,7 @@ export default function ImagePromptForm({
         modelVariant,
         angleShots: buildAngleShots(resolvedPrompt, !!compositions),
         ...(isBatch ? { targets: batchTargets } : {}),
+        ...(!isBatch && singleSourceName ? { sourceName: singleSourceName } : {}),
       });
       return;
     }
@@ -711,6 +792,7 @@ export default function ImagePromptForm({
       provider,
       modelVariant,
       ...(isBatch ? { targets: batchTargets } : {}),
+      ...(!isBatch && singleSourceName ? { sourceName: singleSourceName } : {}),
     });
   };
 
@@ -727,8 +809,37 @@ export default function ImagePromptForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="fixed inset-x-1/2 bottom-4 z-20 hidden w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[2rem] border border-[var(--base-color-brand--umber)]/30 bg-[var(--base-color-brand--champagne)] p-[22px] shadow-[0_12px_40px_-12px_rgba(51,32,26,0.25)] md:block lg:max-w-[1065px]"
+      onPaste={handlePaste}
+      onDragOver={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        setIsDraggingFiles(true);
+      }}
+      onDragLeave={(e) => {
+        // Ignore moves between children; clear only when leaving the form.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setIsDraggingFiles(false);
+      }}
+      onDrop={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        setIsDraggingFiles(false);
+        addReferenceFiles(Array.from(e.dataTransfer.files));
+      }}
+      className={`fixed inset-x-1/2 bottom-4 z-20 hidden w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[2rem] border bg-[var(--base-color-brand--champagne)] p-[22px] shadow-[0_12px_40px_-12px_rgba(51,32,26,0.25)] transition-colors md:block lg:max-w-[1065px] ${
+        isDraggingFiles
+          ? 'border-2 border-dashed border-[var(--base-color-brand--bean)]'
+          : 'border-[var(--base-color-brand--umber)]/30'
+      }`}
     >
+      {isDraggingFiles && (
+        <p
+          role="status"
+          className="pointer-events-none absolute inset-x-0 -top-9 text-center text-sm font-semibold text-[var(--base-color-brand--bean)]"
+        >
+          Drop photos to add them as references
+        </p>
+      )}
       <fieldset className="relative z-20 flex min-w-0 gap-3">
         {/* Left section */}
         <div className="min-h-0 min-w-0 flex-1 space-y-3">
@@ -747,28 +858,36 @@ export default function ImagePromptForm({
                           alt="Reference"
                           className="size-full rounded-xl object-cover"
                         />
-                        <button
-                          type="button"
-                          onClick={() => removeReferenceImage(img.id)}
-                          className="absolute -top-3 -right-3 z-10 grid h-6 w-6 items-center justify-center rounded-full border border-[var(--base-color-brand--umber)]/60 bg-[var(--base-color-brand--shell)] text-[var(--base-color-brand--bean)] transition hover:bg-[var(--base-color-brand--bean)] hover:text-[var(--base-color-brand--shell)] xl:opacity-0 xl:group-hover:opacity-100"
-                        >
-                          <CloseIcon />
-                        </button>
+                        <span className="absolute -top-3 -right-3 z-10">
+                          <Hint text="Remove photo">
+                            <button
+                              type="button"
+                              onClick={() => removeReferenceImage(img.id)}
+                              aria-label="Remove reference photo"
+                              className="grid h-6 w-6 items-center justify-center rounded-full border border-[var(--base-color-brand--umber)]/60 bg-[var(--base-color-brand--shell)] text-[var(--base-color-brand--bean)] transition hover:bg-[var(--base-color-brand--bean)] hover:text-[var(--base-color-brand--shell)] focus-visible:opacity-100 xl:opacity-0 xl:group-hover:opacity-100"
+                            >
+                              <CloseIcon />
+                            </button>
+                          </Hint>
+                        </span>
                       </>
                     )}
                   </div>
                 </div>
               ))}
               {referenceImages.length < MAX_REFERENCE_IMAGES && (
-                <div className="relative size-14 shrink-0 rounded-xl border border-dashed border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)]">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="grid size-full cursor-pointer items-center justify-center text-[var(--base-color-brand--umber)] transition hover:text-[var(--base-color-brand--bean)] active:opacity-60"
-                  >
-                    <ImageAddIcon />
-                  </button>
-                </div>
+                <Hint text="Add more photos">
+                  <div className="relative size-14 shrink-0 rounded-xl border border-dashed border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)]">
+                    <button
+                      type="button"
+                      aria-label="Add reference photos"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="grid size-full cursor-pointer items-center justify-center text-[var(--base-color-brand--umber)] transition hover:text-[var(--base-color-brand--bean)] active:opacity-60"
+                    >
+                      <ImageAddIcon />
+                    </button>
+                  </div>
+                </Hint>
               )}
             </div>
           )}
@@ -784,14 +903,16 @@ export default function ImagePromptForm({
               onChange={handleFileSelect}
             />
             {referenceImages.length === 0 && (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="relative -top-[5.5px] grid h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] text-[var(--base-color-brand--bean)] transition hover:border-[var(--base-color-brand--cinamon)] hover:text-[var(--base-color-brand--cinamon)]"
-                title="Add reference images (max 8)"
-              >
-                <PlusIcon />
-              </button>
+              <Hint text="Add product photos, or drop them here">
+                <button
+                  type="button"
+                  aria-label="Add reference photos"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="relative -top-[5.5px] grid h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] text-[var(--base-color-brand--bean)] transition hover:border-[var(--base-color-brand--cinamon)] hover:text-[var(--base-color-brand--cinamon)]"
+                >
+                  <PlusIcon />
+                </button>
+              </Hint>
             )}
             <textarea
               ref={textareaRef}
@@ -814,10 +935,11 @@ export default function ImagePromptForm({
             />
           </div>
 
-          <CompositionTemplatePicker angleSet={angleSet} />
-          {/* Reserve space for Generate beside the final row of wrapping controls. */}
-          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          {/* Two fixed rows of controls: what to make (row 1), then output settings
+              and composition beside Generate (row 2). Every control shows a short
+              hover/focus hint instead of a "?" marker. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5" data-controls-row="1">
+            <Hint text="Save or reuse prompt wording">
               <SavedPromptsMenu
                 currentPrompt={prompt}
                 onUsePrompt={(saved) => {
@@ -825,12 +947,10 @@ export default function ImagePromptForm({
                   autoResizeTextarea();
                 }}
               />
-              <HelpTip
-                label="About saved prompts"
-                text="Save wording you like, then load it again later. Pair a saved prompt with 'All products' to run the identical prompt across your whole catalogue."
-              />
+            </Hint>
 
-              {modelChoices.length > 0 && (
+            {modelChoices.length > 0 && (
+              <Hint text="Image model">
                 <SelectDropdown
                   options={modelOptions}
                   value={`${provider}:${modelVariant}`}
@@ -842,8 +962,10 @@ export default function ImagePromptForm({
                   }}
                   direction="up"
                 />
-              )}
+              </Hint>
+            )}
 
+            <Hint text="Products to photograph">
               <ProductReferencePicker
                 options={entityOptions}
                 value={selectedEntity}
@@ -851,6 +973,8 @@ export default function ImagePromptForm({
                 onScopeChange={handleEntityChange}
                 onToggleProduct={toggleProductReference}
               />
+            </Hint>
+            <Hint text={folderError ?? 'Reload products and folders'}>
               <button
                 type="button"
                 onClick={() => {
@@ -858,7 +982,6 @@ export default function ImagePromptForm({
                 }}
                 disabled={foldersLoading}
                 className="px-2 text-xs underline disabled:opacity-40"
-                title={folderError ?? 'Refresh product folder choices'}
               >
                 {foldersLoading
                   ? 'Loading folders…'
@@ -866,22 +989,19 @@ export default function ImagePromptForm({
                     ? 'Retry folders'
                     : 'Refresh choices'}
               </button>
-              {folderError && (
-                <span role="status" className="text-xs">
-                  {folderError}
-                </span>
-              )}
-              <HelpTip
-                label="About the product selector"
-                text="Tick entries to combine their photos for one product. Approve suggested pairs on the Products page so folder and All products batches use both views; unpaired entries remain separate. Use up to 7 product photos with a composition, or 8 without one."
-              />
+            </Hint>
+            {folderError && (
+              <span role="status" className="text-xs">
+                {folderError}
+              </span>
+            )}
 
-              {/* Angle set — one shot per camera angle, all from the same photo. */}
+            {/* Angle set — one shot per camera angle, all from the same photo. */}
+            <Hint text="Eye level, 45° and close-up">
               <button
                 type="button"
                 onClick={() => setAngleSet((prev) => !prev)}
                 aria-pressed={angleSet}
-                title={`Generate ${ANGLE_SET_SIZE} shots of the same product: ${PRODUCT_ANGLES.map((a) => a.label).join(', ')}, plus a close-up cropped from the 45° shot`}
                 className={`flex h-10 shrink-0 items-center rounded-full border px-3 text-[11px] font-semibold whitespace-nowrap transition-colors ${
                   angleSet
                     ? 'border-[var(--base-color-brand--bean)] bg-[var(--base-color-brand--bean)] text-[var(--base-color-brand--shell)]'
@@ -890,90 +1010,103 @@ export default function ImagePromptForm({
               >
                 {ANGLE_SET_SIZE} angles
               </button>
-              <HelpTip
-                label="About the angle set"
-                text="Generates eye level and 45° above using their assigned compositions, then crops a left-side close-up from the 45° result. Assignments are remembered for future runs and apply to every selected product. Results may vary."
-              />
-
+            </Hint>
+          </div>
+          {/* Reserve space for Generate beside the output settings row. Generate
+              lines up with the controls, not with any message wrapping below them. */}
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5" data-controls-row="2">
               {/* Image count selector — an angle set fixes its own count. */}
-              <div
-                title={
-                  isProductBatch(selectedEntity) ? 'Images per product (minimum 1)' : 'Image count'
-                }
-                className={`flex h-10 items-center gap-1 rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] px-3 ${
-                  angleSet ? 'pointer-events-none opacity-40' : ''
-                }`}
+              <Hint
+                text={isProductBatch(selectedEntity) ? 'Images per product' : 'Number of images'}
               >
-                <button
-                  type="button"
-                  onClick={decrementCount}
-                  disabled={angleSet || imageCount <= 1}
-                  className="text-[var(--base-color-brand--bean)] transition-colors hover:text-[var(--base-color-brand--cinamon)] disabled:opacity-40 disabled:hover:text-[var(--base-color-brand--bean)]"
+                <div
+                  className={`flex h-10 items-center gap-1 rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] px-3 ${
+                    angleSet ? 'pointer-events-none opacity-40' : ''
+                  }`}
                 >
-                  <MinusIcon />
-                </button>
-                <span className="w-8 text-center text-[11px] font-semibold text-[var(--base-color-brand--bean)]">
-                  {angleSet ? ANGLE_SET_SIZE : imageCount}
-                  <span className="text-[var(--base-color-brand--umber)]">/{maxImages}</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={incrementCount}
-                  disabled={angleSet || imageCount >= maxImages}
-                  className="text-[var(--base-color-brand--bean)] transition-colors hover:text-[var(--base-color-brand--cinamon)] disabled:opacity-40 disabled:hover:text-[var(--base-color-brand--bean)]"
-                >
-                  <PlusIcon />
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    aria-label="Fewer images"
+                    onClick={decrementCount}
+                    disabled={angleSet || imageCount <= 1}
+                    className="text-[var(--base-color-brand--bean)] transition-colors hover:text-[var(--base-color-brand--cinamon)] disabled:opacity-40 disabled:hover:text-[var(--base-color-brand--bean)]"
+                  >
+                    <MinusIcon />
+                  </button>
+                  <span className="w-8 text-center text-[11px] font-semibold text-[var(--base-color-brand--bean)]">
+                    {angleSet ? ANGLE_SET_SIZE : imageCount}
+                    <span className="text-[var(--base-color-brand--umber)]">/{maxImages}</span>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="More images"
+                    onClick={incrementCount}
+                    disabled={angleSet || imageCount >= maxImages}
+                    className="text-[var(--base-color-brand--bean)] transition-colors hover:text-[var(--base-color-brand--cinamon)] disabled:opacity-40 disabled:hover:text-[var(--base-color-brand--bean)]"
+                  >
+                    <PlusIcon />
+                  </button>
+                </div>
+              </Hint>
 
               {usesComposition ? (
-                <span
-                  className="px-2 text-xs"
-                  title="Composition fixes the output aspect. Select None to change it."
-                >
-                  {angleSet
-                    ? 'Aspect fixed per angle composition'
-                    : `${effectiveAspect} · Fixed by composition`}
-                </span>
+                <Hint text="Set by the composition; choose None to change">
+                  <span className="px-2 text-xs">
+                    {angleSet
+                      ? 'Aspect fixed per angle composition'
+                      : `${effectiveAspect} · Fixed by composition`}
+                  </span>
+                </Hint>
               ) : (
-                <SelectDropdown
-                  options={aspectRatioOptions}
-                  value={aspectRatio}
-                  onChange={setAspectRatio}
-                  icon={aspectRatioIcons[aspectRatio] || <AutoIcon />}
-                  showIcons
-                  direction="up"
-                />
+                <Hint text="Aspect ratio">
+                  <SelectDropdown
+                    options={aspectRatioOptions}
+                    value={aspectRatio}
+                    onChange={setAspectRatio}
+                    icon={aspectRatioIcons[aspectRatio] || <AutoIcon />}
+                    showIcons
+                    direction="up"
+                  />
+                </Hint>
               )}
 
-              <SelectDropdown
-                options={qualityOptions}
-                value={resolution}
-                onChange={setResolution}
-                icon={<ResolutionIcon />}
-                direction="up"
-              />
+              <Hint text="Image quality">
+                <SelectDropdown
+                  options={qualityOptions}
+                  value={resolution}
+                  onChange={setResolution}
+                  icon={<ResolutionIcon />}
+                  direction="up"
+                />
+              </Hint>
 
-              <SelectDropdown
-                options={outputFormatOptions}
-                value={outputFormat}
-                onChange={setOutputFormat}
-                icon={<FormatIcon />}
-                direction="up"
-              />
+              <Hint text="File type">
+                <SelectDropdown
+                  options={outputFormatOptions}
+                  value={outputFormat}
+                  onChange={setOutputFormat}
+                  icon={<FormatIcon />}
+                  direction="up"
+                />
+              </Hint>
+
+              <CompositionTemplatePicker angleSet={angleSet} />
             </div>
             {/* Generate stays alongside the controls and matches their 40px height. */}
-            <button
-              type="submit"
-              disabled={isImagesLoading || preflighting}
-              className="inline-grid h-10 w-28 shrink-0 grid-flow-col items-center justify-center gap-2 rounded-full border-none bg-[var(--base-color-brand--cinamon)] px-2.5 text-sm font-semibold tracking-wide text-[var(--base-color-brand--shell)] shadow-[0_4px_0_0_var(--base-color-brand--dark-red)] transition-[background-color,box-shadow,transform] duration-150 hover:bg-[var(--base-color-brand--red)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--base-color-brand--bean)] active:translate-y-0.5 active:shadow-[0_2px_0_0_var(--base-color-brand--dark-red)] disabled:cursor-not-allowed disabled:bg-[var(--base-color-brand--umber)] disabled:text-[var(--base-color-brand--shell)]/70 disabled:shadow-[0_4px_0_0_var(--base-color-brand--bean)]"
-              style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
-            >
-              <span className="text-[11px] font-semibold whitespace-nowrap">
-                {preflighting ? 'Checking…' : isImagesLoading ? 'Uploading...' : 'Generate'}
-              </span>
-              <SparkleIcon />
-            </button>
+            <Hint text="Create the images">
+              <button
+                type="submit"
+                disabled={isImagesLoading || preflighting}
+                className="inline-grid h-10 w-28 shrink-0 grid-flow-col items-center justify-center gap-2 rounded-full border-none bg-[var(--base-color-brand--cinamon)] px-2.5 text-sm font-semibold tracking-wide text-[var(--base-color-brand--shell)] shadow-[0_4px_0_0_var(--base-color-brand--dark-red)] transition-[background-color,box-shadow,transform] duration-150 hover:bg-[var(--base-color-brand--red)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--base-color-brand--bean)] active:translate-y-0.5 active:shadow-[0_2px_0_0_var(--base-color-brand--dark-red)] disabled:cursor-not-allowed disabled:bg-[var(--base-color-brand--umber)] disabled:text-[var(--base-color-brand--shell)]/70 disabled:shadow-[0_4px_0_0_var(--base-color-brand--bean)]"
+                style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
+              >
+                <span className="text-[11px] font-semibold whitespace-nowrap">
+                  {preflighting ? 'Checking…' : isImagesLoading ? 'Uploading...' : 'Generate'}
+                </span>
+                <SparkleIcon />
+              </button>
+            </Hint>
           </div>
         </div>
       </fieldset>

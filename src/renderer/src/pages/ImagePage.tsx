@@ -60,7 +60,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null);
   const [labelImage, setLabelImage] = useState<GeneratedImage | null>(null);
   const [recreateData, setRecreateData] = useState<{ prompt: string } | null>(null);
-  const [editData, setEditData] = useState<{ imageUrl: string } | null>(null);
+  const [editData, setEditData] = useState<{ imageUrl: string; sourceName?: string } | null>(null);
 
   // Handle prefilled prompt from Prompts page
   useEffect(() => {
@@ -107,9 +107,47 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
 
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isSelectingAll, setIsSelectingAll] = useState(false);
   const selectedCount = selectedImages.size;
+  const allSelected =
+    !hasMore &&
+    generatedImages.length > 0 &&
+    generatedImages.every((image) => selectedImages.has(image.id));
 
   const clearSelection = useCallback(() => setSelectedImages(new Set()), []);
+
+  /**
+   * Select every saved image, not just the pages loaded so far, so a bulk
+   * export covers the whole gallery. Stops (and says so) if a page won't load.
+   */
+  const selectAll = useCallback(async () => {
+    if (isSelectingAll) return;
+    setIsSelectingAll(true);
+    try {
+      let gallery = useImagesStore.getState();
+      let waits = 0;
+      while (gallery.hasMore) {
+        const before = gallery.images.length;
+        if (gallery.isLoadingMore) {
+          // A scroll-triggered page is already loading; let it finish.
+          if (++waits > 100) break;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        } else {
+          await gallery.loadMore();
+          if (useImagesStore.getState().images.length === before) break;
+        }
+        gallery = useImagesStore.getState();
+      }
+      setSelectedImages(new Set(gallery.images.map((image) => image.id)));
+      if (gallery.hasMore) {
+        toast.error(
+          `Couldn't load every image. Selected the ${gallery.images.length} that loaded.`,
+        );
+      }
+    } finally {
+      setIsSelectingAll(false);
+    }
+  }, [isSelectingAll]);
 
   const handleBatchDeleteClick = useCallback(() => {
     if (selectedCount === 0) return;
@@ -117,9 +155,9 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
   }, [selectedCount]);
 
   /**
-   * Save every selected image into one folder, picked once. Names come from
-   * each image's prompt, which already carries the product name and shot for
-   * anything produced by a batch or angle-set run.
+   * Save every selected image into one folder, picked once. Each file is named
+   * after the original photo it was made from; older images without a stored
+   * name fall back to their prompt.
    */
   const handleExportSelected = useCallback(async () => {
     if (selectedCount === 0 || isExporting) return;
@@ -128,7 +166,8 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
       .filter((image) => selectedImages.has(image.id))
       .map((image) => ({
         url: image.url,
-        name: image.prompt,
+        // Keep the original photo's name; older images fall back to the prompt.
+        name: image.sourceName ?? image.prompt,
         // The stored URL ends in the saved filename, which carries the
         // extension the export should keep.
         filename: image.url.split('/').pop() ?? undefined,
@@ -207,7 +246,11 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
   }, []);
 
   const handleEdit = useCallback((imageUrl: string) => {
-    setEditData({ imageUrl });
+    // An edit is a new image of the same photo, so it keeps the photo's name.
+    const sourceName = useImagesStore
+      .getState()
+      .images.find((image) => image.url === imageUrl)?.sourceName;
+    setEditData(sourceName ? { imageUrl, sourceName } : { imageUrl });
   }, []);
 
   const handleGenerate = async (data: {
@@ -225,10 +268,13 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     composition?: ShootTemplate;
     compositions?: CompositionAssignments;
     singleShotAngle?: ShootAngle;
+    sourceName?: string;
   }): Promise<void> => {
     const angleShots = data.angleShots;
     const isAngleSet = Boolean(angleShots?.length);
-    const targets = data.targets?.length ? data.targets : [defaultTarget(data.referenceImages)];
+    const targets = data.targets?.length
+      ? data.targets
+      : [defaultTarget(data.referenceImages, data.sourceName)];
 
     let jobs: ReturnType<typeof buildGenerationJobs>;
     try {
@@ -267,6 +313,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
           id: `crop-${Date.now()}-${target.key}`,
           targetKey: target.key,
           targetLabel: target.label,
+          sourceName: target.sourceName,
         }))
       : [];
     for (const crop of cropJobs) {
@@ -309,6 +356,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
               // The fal path honours every variant; the OpenAI paths honour
               // the GPT Image 2.5 variants and otherwise use GPT Image 2.
               model,
+              ...(job.sourceName ? { sourceName: job.sourceName } : {}),
             });
 
             addImage(savedImage);
@@ -350,6 +398,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
               prompt: labelledPrompt(`${CLOSE_UP_LABEL} — ${data.prompt}`, crop.targetLabel),
               aspectRatio: '1:1',
               model,
+              ...(crop.sourceName ? { sourceName: crop.sourceName } : {}),
             });
             addImage(savedImage);
             successCount++;
@@ -377,7 +426,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
 
   return (
     <>
-      <div className="relative min-h-0 flex-1 px-4 pt-4">
+      <div className="relative flex min-h-0 flex-1 flex-col px-4 pt-4">
         {/* Selection toolbar — slides down from the top-right of the image
             grid whenever at least one image is selected. Contains a count,
             a delete action, and a clear-selection button. */}
@@ -396,6 +445,17 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
             >
               {selectedCount} selected
             </span>
+            {selectedCount > 0 && !allSelected && (
+              <button
+                type="button"
+                onClick={() => void selectAll()}
+                disabled={isSelectingAll}
+                className="btn-cinamon btn-sm"
+                title="Select every image in the gallery"
+              >
+                {isSelectingAll ? 'Selecting…' : 'Select all'}
+              </button>
+            )}
             <button
               type="button"
               onClick={handleExportSelected}
@@ -427,7 +487,25 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
           </div>
         </div>
 
-        <div className="h-full">
+        {/* Header row: keeps "Select all" off the images. The selection
+            toolbar above slides over this row once something is selected. */}
+        {!isLoading && generatedImages.length > 0 && (
+          <div className="flex h-10 shrink-0 items-start justify-end">
+            {selectedCount === 0 && (
+              <button
+                type="button"
+                onClick={() => void selectAll()}
+                disabled={isSelectingAll}
+                className="btn-cinamon btn-sm"
+                title="Select every image in the gallery, ready to export"
+              >
+                {isSelectingAll ? 'Selecting…' : 'Select all'}
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="min-h-0 flex-1">
           {isLoading ? (
             <div className="flex h-full w-full items-center justify-center">
               <div className="flex flex-col items-center gap-3">

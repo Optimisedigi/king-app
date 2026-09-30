@@ -1,7 +1,20 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ShootAngle, ShootTemplate } from '../../../shared/shootTemplates';
+import {
+  isRecord,
+  SHOOT_ANGLES,
+  type ShootAngle,
+  type ShootTemplate,
+} from '../../../shared/shootTemplates';
 import type { CompositionSelection, CompositionSelections } from '@/lib/compositionAssignments';
+
+/** The composition settings a product folder remembers. */
+export interface FolderCompositionLink {
+  selectedId: string | null;
+  singleShotAngle: ShootAngle;
+  angleSelections: CompositionSelections;
+}
+
 interface CompositionState {
   selectedId: string | null;
   singleShotAngle: ShootAngle;
@@ -11,59 +24,194 @@ interface CompositionState {
   loaded: boolean;
   error: string;
   notice: string;
+  /**
+   * Composition settings per product folder, keyed by the folder's picker value
+   * (`folder:<id>` or `folder:unfiled`), so cakes of different sizes can each
+   * keep their own framing.
+   */
+  folderLinks: Record<string, FolderCompositionLink>;
+  /** The folder currently picked in the Image tab, or null. Not persisted. */
+  activeFolder: string | null;
   select: (id: string | null) => void;
   setAngle: (angle: ShootAngle) => void;
+  /** Call whenever the product picker changes; applies a folder's saved composition. */
+  enterScope: (scope: string) => void;
   reload: () => Promise<void>;
 }
+
+/** Folder picks (including unfiled products) get their own composition. */
+export function isFolderScope(scope: string): boolean {
+  return scope.startsWith('folder:');
+}
+
+function isShootAngle(value: unknown): value is ShootAngle {
+  return SHOOT_ANGLES.some((angle) => angle === value);
+}
+
+/** Saved links come from local storage, so check their shape before trusting them. */
+function readLink(value: unknown): FolderCompositionLink | null {
+  if (!isRecord(value)) return null;
+  const { selectedId, singleShotAngle, angleSelections } = value;
+  if (selectedId !== null && typeof selectedId !== 'string') return null;
+  if (!isShootAngle(singleShotAngle) || !isRecord(angleSelections)) return null;
+  const selections: CompositionSelections = {};
+  for (const angle of SHOOT_ANGLES) {
+    const selection = angleSelections[angle];
+    if (selection === undefined || selection === null) continue;
+    if (
+      !isRecord(selection) ||
+      typeof selection.templateId !== 'string' ||
+      !isShootAngle(selection.referenceAngle)
+    )
+      return null;
+    selections[angle] = {
+      templateId: selection.templateId,
+      referenceAngle: selection.referenceAngle,
+    };
+  }
+  return { selectedId, singleShotAngle, angleSelections: selections };
+}
+
 export const useCompositionStore = create<CompositionState>()(
   persist(
-    (set, get) => ({
-      selectedId: null,
-      singleShotAngle: 'eye-level',
-      angleSelections: {},
-      assignAngle: (angle, selection) =>
-        set((state) => ({ angleSelections: { ...state.angleSelections, [angle]: selection } })),
-      templates: [],
-      loaded: false,
-      error: '',
-      notice: '',
-      select: (selectedId) => set({ selectedId, notice: '' }),
-      setAngle: (singleShotAngle) => set({ singleShotAngle }),
-      reload: async (): Promise<void> => {
-        try {
-          const templates = await window.api.shootTemplates.list();
-          const selected = get().selectedId;
-          const missing =
-            selected !== null &&
-            !templates.some((template) => template.id === selected && !template.archivedAt);
+    (set, get) => {
+      /** Save the current settings for the picked folder, if any. */
+      function rememberForFolder(): Partial<CompositionState> {
+        const { activeFolder, selectedId, singleShotAngle, angleSelections, folderLinks } = get();
+        if (!activeFolder) return { notice: '' };
+        return {
+          folderLinks: {
+            ...folderLinks,
+            [activeFolder]: { selectedId, singleShotAngle, angleSelections },
+          },
+          notice: 'Saved as this folder\u2019s composition.',
+        };
+      }
+      return {
+        selectedId: null,
+        singleShotAngle: 'eye-level',
+        angleSelections: {},
+        folderLinks: {},
+        activeFolder: null,
+        assignAngle: (angle, selection) => {
+          set((state) => ({ angleSelections: { ...state.angleSelections, [angle]: selection } }));
+          set(rememberForFolder());
+        },
+        templates: [],
+        loaded: false,
+        error: '',
+        notice: '',
+        select: (selectedId) => {
+          set({ selectedId });
+          set(rememberForFolder());
+        },
+        setAngle: (singleShotAngle) => {
+          set({ singleShotAngle });
+          set(rememberForFolder());
+        },
+        enterScope: (scope) => {
+          if (!isFolderScope(scope)) {
+            if (get().activeFolder) set({ activeFolder: null, notice: '' });
+            return;
+          }
+          if (get().activeFolder === scope) return;
+          const { folderLinks, templates, loaded } = get();
+          const link = readLink(folderLinks[scope]);
+          if (!link) {
+            // Nothing saved yet: start from None so another folder's framing is
+            // never generated by accident, and so choosing any composition
+            // registers as a change and gets remembered.
+            const hasTemplates = templates.some((template) => !template.archivedAt);
+            set({
+              activeFolder: scope,
+              selectedId: null,
+              angleSelections: {},
+              notice: hasTemplates
+                ? 'No composition saved for this folder yet. Choose one and it will be remembered.'
+                : '',
+            });
+            return;
+          }
+          // Only restore compositions that still exist. Until templates load this
+          // can't be checked; Generate's own check still refuses missing ones.
+          const active = (id: string): ShootTemplate | undefined =>
+            templates.find((template) => template.id === id && !template.archivedAt);
+          const template = link.selectedId === null ? undefined : active(link.selectedId);
+          const missingSingle = loaded && link.selectedId !== null && !template;
+          const angleSelections: CompositionSelections = {};
+          let missingAngles = false;
+          for (const angle of SHOOT_ANGLES) {
+            const selection = link.angleSelections[angle];
+            if (!selection) continue;
+            if (loaded && !active(selection.templateId)?.angles[selection.referenceAngle]) {
+              missingAngles = true;
+              continue;
+            }
+            angleSelections[angle] = selection;
+          }
+          const problems = [
+            ...(missingSingle
+              ? ['This folder\u2019s composition is missing or archived. Composition is now None.']
+              : []),
+            ...(missingAngles
+              ? [
+                  'Some of this folder\u2019s 3-angle compositions are missing or archived and were cleared.',
+                ]
+              : []),
+          ];
           set({
-            templates,
-            loaded: true,
-            error: '',
-            ...(missing
-              ? {
-                  selectedId: null,
-                  notice: 'Saved composition is missing or archived. Composition is now None.',
-                }
-              : {}),
+            activeFolder: scope,
+            selectedId: missingSingle ? null : link.selectedId,
+            singleShotAngle: link.singleShotAngle,
+            angleSelections,
+            notice: problems.length
+              ? problems.join(' ')
+              : template
+                ? `Using this folder\u2019s composition: ${template.name}.`
+                : link.selectedId !== null
+                  ? 'Using this folder\u2019s saved composition.'
+                  : Object.values(angleSelections).some(Boolean)
+                    ? 'Using this folder\u2019s 3-angle compositions.'
+                    : 'This folder uses no composition.',
           });
-        } catch (error) {
-          set({
-            loaded: true,
-            error:
-              error instanceof Error
-                ? error.message
-                : 'Could not load compositions. Retry before generating.',
-          });
-        }
-      },
-    }),
+        },
+        reload: async (): Promise<void> => {
+          try {
+            const templates = await window.api.shootTemplates.list();
+            const selected = get().selectedId;
+            const missing =
+              selected !== null &&
+              !templates.some((template) => template.id === selected && !template.archivedAt);
+            set({
+              templates,
+              loaded: true,
+              error: '',
+              ...(missing
+                ? {
+                    selectedId: null,
+                    notice: 'Saved composition is missing or archived. Composition is now None.',
+                  }
+                : {}),
+            });
+          } catch (error) {
+            set({
+              loaded: true,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : 'Could not load compositions. Retry before generating.',
+            });
+          }
+        },
+      };
+    },
     {
       name: 'composition-preferences',
       partialize: (state) => ({
         selectedId: state.selectedId,
         singleShotAngle: state.singleShotAngle,
         angleSelections: state.angleSelections,
+        folderLinks: state.folderLinks,
       }),
     },
   ),
