@@ -29,9 +29,11 @@ async function run() {
           context.fillStyle = 'blue'; context.fillRect(0, 0, 400, 400);
           const backgroundPng = canvas.toDataURL();
           const images = ['one', 'two', 'three'].map(id => ({id, url: png, prompt: id, aspectRatio: '1:1', createdAt: '2026-01-01'}));
+          window.storedLabel = png;
           window.api = {
-            images: {preview: async () => backgroundPng, approvedLabel: async () => null,
-              saveApprovedLabel: async data => { window.savedLabel = data; },
+            images: {preview: async () => backgroundPng, approvedLabel: async () => window.storedLabel,
+              saveApprovedLabel: async data => { if(window.failLabelSave) throw new Error('Save failed'); window.savedLabel = data; window.storedLabel = data; },
+              removeApprovedLabel: async () => { if(window.failLabelRemoval) throw new Error('Removal failed'); window.storedLabel = null; },
               save: async data => { window.savedCopy = data.url; return {...images[0], id:'saved-copy', url:data.url}; },
               list: async () => ({data: [images[2]], hasMore: false})},
             entities: {list: async () => []}, productFolders: {list: async () => []},
@@ -104,7 +106,49 @@ async function run() {
     await waitFor(
       'typeof selectPhoto === "function" && document.querySelector("input[type=file]")',
     );
+    await waitFor(`document.querySelector('img[alt="Saved approved label"]')?.complete`);
+    assert.equal(
+      await evaluate(
+        '[...document.querySelectorAll("dialog button")].some(button => button.textContent.trim() === "Replace saved label")',
+      ),
+      true,
+      'Saved label has an explicit replacement action',
+    );
+    await evaluate('window.failLabelRemoval=true;clickButton("Remove saved label")');
+    await waitFor(
+      '[...document.querySelectorAll("dialog button")].some(button => button.textContent.trim() === "Remove saved label" && !button.disabled)',
+    );
+    assert.ok(
+      await evaluate(
+        'document.querySelector(\'img[alt="Saved approved label"]\') && window.storedLabel',
+      ),
+      'Failed removal retains the saved label',
+    );
+    await evaluate('window.failLabelRemoval=false;clickButton("Remove saved label")');
+    await waitFor(
+      `!document.querySelector('img[alt="Saved approved label"]') && window.storedLabel === null`,
+    );
+    await evaluate('clickButton("Undo removal")');
+    await waitFor(
+      `document.querySelector('img[alt="Saved approved label"]')?.complete && window.storedLabel`,
+    );
     await evaluate('selectPhoto()');
+    await waitFor(`document.querySelector('img[alt="Source photo for label crop"]')?.complete`);
+    assert.equal(
+      await evaluate(
+        '[...document.querySelectorAll("dialog button")].some(button => button.textContent.trim() === "Save corrected copy")',
+      ),
+      false,
+      'Replacement crop does not offer saving the old label',
+    );
+    await evaluate('clickButton("Cancel crop")');
+    await waitFor(
+      `!document.querySelector('img[alt="Source photo for label crop"]') && document.querySelector('img[alt="Saved approved label"]')?.complete`,
+    );
+    await evaluate('selectPhoto()');
+    console.log(
+      'PASS saved label replacement, removal, failure preservation, undo removal and cancel',
+    );
     await waitFor(`document.querySelector('img[alt="Source photo for label crop"]')?.complete`);
     const rect = await evaluate(
       `(() => { const r = document.querySelector('img[alt="Source photo for label crop"]').getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height}; })()`,
@@ -173,7 +217,21 @@ async function run() {
     await waitFor('document.querySelectorAll("section input[type=range]").length === 4');
     await evaluate('setRange("Crop height", 20)');
     await waitFor('Number(document.querySelectorAll("section input[type=range]")[3].value) === 20');
-    await evaluate('clickButton("Save label for reuse")');
+    const previousLabel = await evaluate('window.storedLabel');
+    await evaluate('window.failLabelSave=true;clickButton("Replace saved label with crop")');
+    await waitFor(
+      '[...document.querySelectorAll("dialog button")].some(button => button.textContent.trim() === "Replace saved label with crop" && !button.disabled)',
+    );
+    assert.equal(
+      await evaluate('window.storedLabel'),
+      previousLabel,
+      'Failed replacement keeps the previous saved label',
+    );
+    assert.ok(
+      await evaluate('document.querySelector(\'img[alt="Source photo for label crop"]\')'),
+      'Failed replacement retains the crop for retry',
+    );
+    await evaluate('window.failLabelSave=false;clickButton("Replace saved label with crop")');
     await waitFor(
       `document.querySelector('img[alt="Saved approved label"]')?.naturalHeight === 512`,
     );

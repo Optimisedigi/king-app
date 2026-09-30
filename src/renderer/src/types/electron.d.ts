@@ -197,6 +197,7 @@ export interface ElectronAPI {
     cropCloseUp: (localUrl: string) => Promise<{ success: boolean; dataUrl?: string }>;
     preview: (id: string) => Promise<string>;
     approvedLabel: () => Promise<string | null>;
+    removeApprovedLabel: () => Promise<void>;
     saveApprovedLabel: (dataUrl: string) => Promise<void>;
     delete: (id: string) => Promise<{ success: boolean }>;
   };

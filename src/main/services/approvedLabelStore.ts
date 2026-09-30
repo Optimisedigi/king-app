@@ -19,6 +19,17 @@ export async function readApprovedLabel(): Promise<string | null> {
   }
 }
 
+/** Remove only the reusable preset; retain its latest crop for recovery. */
+export async function removeApprovedLabel(): Promise<void> {
+  try {
+    await rename(labelFile(), join(getDataDir(), 'approved-cake-label-removed.png'));
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')
+      return;
+    throw error;
+  }
+}
+
 export async function saveApprovedLabel(dataUrl: string): Promise<void> {
   if (typeof dataUrl !== 'string' || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(dataUrl))
     throw new Error('Choose a valid PNG label.');

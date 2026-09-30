@@ -71,9 +71,11 @@ export function ApprovedLabelEditor({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const sourceUrlRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [background, setBackground] = useState<HTMLImageElement | null>(null);
   const [source, setSource] = useState<HTMLImageElement | null>(null);
   const [label, setLabel] = useState<HTMLImageElement | null>(null);
+  const [removedLabel, setRemovedLabel] = useState<HTMLImageElement | null>(null);
   const [placement, setPlacement] = useState<LabelPlacement>(initialPlacement);
   const [feather, setFeather] = useState<LabelFeather>({ left: 0, right: 0, top: 0, bottom: 0 });
   const [eraseMode, setEraseMode] = useState(false);
@@ -197,7 +199,7 @@ export function ApprovedLabelEditor({
         canvasRef.current,
         background,
         label ?? background,
-        label ? placement : { ...placement, width: 0 },
+        label && !source ? placement : { ...placement, width: 0 },
         760,
         erased,
         feather,
@@ -205,7 +207,7 @@ export function ApprovedLabelEditor({
     } catch {
       toast.error('Could not draw the preview.');
     }
-  }, [background, label, placement, erased, feather]);
+  }, [background, label, source, placement, erased, feather]);
 
   async function selectFile(file?: File): Promise<void> {
     if (!file) return;
@@ -240,11 +242,51 @@ export function ApprovedLabelEditor({
       await window.api.images.saveApprovedLabel(png);
       setLabel(await loadImage(png));
       setErased([]);
+      setRemovedLabel(null);
       setSource(null);
       clearUndo();
       toast.success('Approved label saved for reuse.');
     } catch (error) {
       toast.error(cleanIpcError(error, 'Could not save the label.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function cancelCrop(): void {
+    if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
+    sourceUrlRef.current = null;
+    setSource(null);
+    clearUndo();
+  }
+
+  async function removeLabel(): Promise<void> {
+    if (!label || busy) return;
+    setBusy(true);
+    try {
+      await window.api.images.removeApprovedLabel();
+      setRemovedLabel(label);
+      setLabel(null);
+      setErased([]);
+      clearUndo();
+      toast.success('Saved label removed. Your cake images are unchanged.');
+    } catch (error) {
+      toast.error(cleanIpcError(error, 'Could not remove the label.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreLabel(): Promise<void> {
+    if (!removedLabel || busy) return;
+    setBusy(true);
+    try {
+      await window.api.images.saveApprovedLabel(removedLabel.src);
+      setLabel(removedLabel);
+      setRemovedLabel(null);
+      clearUndo();
+    } catch (error) {
+      toast.error(cleanIpcError(error, 'Could not restore the label.'));
     } finally {
       setBusy(false);
     }
@@ -370,18 +412,53 @@ export function ApprovedLabelEditor({
             )}
           </div>
           <div className="flex flex-col gap-4">
-            <label className="text-sm font-semibold">
-              Real label photo
+            <div className="space-y-2">
               <input
+                ref={fileInputRef}
                 type="file"
+                aria-label="Choose real label photo"
                 accept="image/png,image/jpeg,image/webp"
-                className="mt-1 block w-full text-sm"
+                className="sr-only"
+                tabIndex={-1}
+                disabled={busy || loading}
                 onChange={(event) => {
                   void selectFile(event.currentTarget.files?.[0]);
                   event.currentTarget.value = '';
                 }}
               />
-            </label>
+              <button
+                type="button"
+                className="btn-cinamon btn-sm w-full"
+                disabled={busy || loading}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {source
+                  ? 'Choose another photo'
+                  : label
+                    ? 'Replace saved label'
+                    : 'Choose label photo'}
+              </button>
+              {label && !source && (
+                <button
+                  type="button"
+                  className="btn-cinamon btn-sm w-full"
+                  disabled={busy || loading}
+                  onClick={() => void removeLabel()}
+                >
+                  Remove saved label
+                </button>
+              )}
+              {removedLabel && !label && !source && (
+                <button
+                  type="button"
+                  className="btn-cinamon btn-sm w-full"
+                  disabled={busy}
+                  onClick={() => void restoreLabel()}
+                >
+                  Undo removal
+                </button>
+              )}
+            </div>
             {source && (
               <section className="space-y-2 rounded-xl border border-[var(--base-color-brand--umber)]/50 p-3">
                 <h3 className="font-semibold">Crop the label</h3>
@@ -482,11 +559,19 @@ export function ApprovedLabelEditor({
                   onClick={() => void saveCrop()}
                   disabled={busy}
                 >
-                  Save label for reuse
+                  {label ? 'Replace saved label with crop' : 'Save label for reuse'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-cinamon btn-sm"
+                  disabled={busy}
+                  onClick={cancelCrop}
+                >
+                  Cancel crop
                 </button>
               </section>
             )}
-            {label && (
+            {label && !source && (
               <>
                 <div className="flex items-center gap-3 text-sm">
                   <img

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdtemp, rm, writeFile, readFile, mkdir } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -9,6 +9,7 @@ vi.mock('../../../src/main/services/paths', () => ({ getDataDir: () => state.dir
 import {
   readApprovedLabel,
   saveApprovedLabel,
+  removeApprovedLabel,
 } from '../../../src/main/services/approvedLabelStore';
 
 const png = `data:image/png;base64,${Buffer.concat([
@@ -27,6 +28,28 @@ describe('approved label persistence', () => {
   it('returns null when no label was saved and reads a saved label after a restart', async () => {
     expect(await readApprovedLabel()).toBeNull();
     await saveApprovedLabel(png);
+    expect(await readApprovedLabel()).toBe(png);
+  });
+
+  it('removes only the saved label, keeps a recovery copy and allows restoration', async () => {
+    const original = join(state.directory, 'original-cake.png');
+    await writeFile(original, 'keep this cake');
+    await saveApprovedLabel(png);
+    await removeApprovedLabel();
+    expect(await readApprovedLabel()).toBeNull();
+    expect(await readFile(original, 'utf8')).toBe('keep this cake');
+    expect(await readFile(join(state.directory, 'approved-cake-label-removed.png'))).toEqual(
+      Buffer.from(png.split(',')[1] ?? '', 'base64'),
+    );
+    await removeApprovedLabel();
+    await saveApprovedLabel(png);
+    expect(await readApprovedLabel()).toBe(png);
+  });
+
+  it('keeps the approved label when removal cannot create its recovery copy', async () => {
+    await saveApprovedLabel(png);
+    await mkdir(join(state.directory, 'approved-cake-label-removed.png'));
+    await expect(removeApprovedLabel()).rejects.toThrow();
     expect(await readApprovedLabel()).toBe(png);
   });
 

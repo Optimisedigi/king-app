@@ -4,6 +4,7 @@ const state = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   decode: vi.fn(() => ({ getSize: () => ({ width: 1024, height: 1024 }) })),
   save: vi.fn().mockResolvedValue(undefined),
+  remove: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('electron', () => ({
   app: { getAppPath: () => '/trusted/app' },
@@ -16,6 +17,7 @@ vi.mock('electron', () => ({
 vi.mock('../../../src/main/services/approvedLabelStore', () => ({
   readApprovedLabel: vi.fn().mockResolvedValue(null),
   saveApprovedLabel: state.save,
+  removeApprovedLabel: state.remove,
 }));
 vi.mock('../../../src/main/services/imageStore', () => ({
   getImage: vi.fn(),
@@ -41,6 +43,7 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(() => ({ getSize: () => ({ width: 1024, height: 1024 }) }));
   state.save.mockClear();
+  state.remove.mockClear();
   registerImageHandlers();
 });
 
@@ -49,6 +52,16 @@ describe('approved label IPC boundary', () => {
     await expect(call('x'.repeat(6_000_001))).rejects.toThrow();
     state.decode.mockImplementationOnce(() => ({ getSize: () => ({ width: 0, height: 0 }) }));
     await expect(call('data:image/png;base64,invalid')).rejects.toThrow('valid PNG');
+    expect(state.save).not.toHaveBeenCalled();
+  });
+
+  it('removes the preset only after sender validation', async () => {
+    expect(() => state.handlers.get('images:removeApprovedLabel')?.({ senderFrame: null })).toThrow(
+      'IPC:',
+    );
+    expect(state.remove).not.toHaveBeenCalled();
+    await state.handlers.get('images:removeApprovedLabel')?.(trusted);
+    expect(state.remove).toHaveBeenCalledExactlyOnceWith();
     expect(state.save).not.toHaveBeenCalled();
   });
 

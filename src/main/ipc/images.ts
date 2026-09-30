@@ -1,7 +1,11 @@
 import { randomUUID } from 'crypto';
 import { stat } from 'fs/promises';
 import { nativeImage } from 'electron';
-import { readApprovedLabel, saveApprovedLabel } from '../services/approvedLabelStore';
+import {
+  readApprovedLabel,
+  saveApprovedLabel,
+  removeApprovedLabel,
+} from '../services/approvedLabelStore';
 import {
   listImages,
   addImage,
@@ -66,6 +70,7 @@ export function registerImageHandlers(): void {
   });
 
   secureHandle('images:approvedLabel', async () => readApprovedLabel());
+  secureHandle('images:removeApprovedLabel', async () => removeApprovedLabel());
   secureHandle('images:saveApprovedLabel', async (_event, dataUrl: string) => {
     if (typeof dataUrl !== 'string' || dataUrl.length > 6_000_000)
       throw new Error('The label is too large.');

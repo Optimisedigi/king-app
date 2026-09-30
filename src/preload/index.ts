@@ -18,6 +18,7 @@ const api = {
     cropCloseUp: (localUrl: string) => ipcRenderer.invoke('images:cropCloseUp', localUrl),
     preview: (id: string) => ipcRenderer.invoke('images:preview', id),
     approvedLabel: () => ipcRenderer.invoke('images:approvedLabel'),
+    removeApprovedLabel: () => ipcRenderer.invoke('images:removeApprovedLabel'),
     saveApprovedLabel: (dataUrl: string) => ipcRenderer.invoke('images:saveApprovedLabel', dataUrl),
     delete: (id: string) => ipcRenderer.invoke('images:delete', id),
   },
