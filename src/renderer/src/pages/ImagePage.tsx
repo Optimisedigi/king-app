@@ -9,6 +9,7 @@ import {
   type GeneratedImage,
 } from '@/components/image';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
+import { ApprovedLabelEditor } from '@/components/image/ApprovedLabelEditor';
 import { useImages } from '@/hooks';
 import { useGenerationStore } from '@/stores/generationStore';
 import { cleanIpcError } from '@/lib/ipcError';
@@ -56,6 +57,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
 
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null);
+  const [labelImage, setLabelImage] = useState<GeneratedImage | null>(null);
   const [recreateData, setRecreateData] = useState<{ prompt: string } | null>(null);
   const [editData, setEditData] = useState<{ imageUrl: string } | null>(null);
 
@@ -445,6 +447,18 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
           onDownload={handleDownload}
           onRecreate={(prompt) => {
             setRecreateData({ prompt });
+            setSelectedImage(null);
+          }}
+          onCorrectLabel={() => setLabelImage(selectedImage)}
+        />
+      )}
+
+      {labelImage && (
+        <ApprovedLabelEditor
+          image={labelImage}
+          onClose={() => setLabelImage(null)}
+          onSaved={(saved) => {
+            addImage(saved);
             setSelectedImage(null);
           }}
         />

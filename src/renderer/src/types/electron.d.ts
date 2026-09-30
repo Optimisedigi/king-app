@@ -195,6 +195,9 @@ export interface ElectronAPI {
      * URL. Returns a PNG data URL ready to pass back to `save`.
      */
     cropCloseUp: (localUrl: string) => Promise<{ success: boolean; dataUrl?: string }>;
+    preview: (id: string) => Promise<string>;
+    approvedLabel: () => Promise<string | null>;
+    saveApprovedLabel: (dataUrl: string) => Promise<void>;
     delete: (id: string) => Promise<{ success: boolean }>;
   };
   generate: {

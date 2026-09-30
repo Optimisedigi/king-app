@@ -8,6 +8,7 @@ interface ImageDetailOverlayProps {
   onDelete: (id: string) => void;
   onDownload: (url: string, prompt: string) => void;
   onRecreate: (prompt: string) => void;
+  onCorrectLabel?: () => void;
 }
 
 export default function ImageDetailOverlay({
@@ -16,6 +17,7 @@ export default function ImageDetailOverlay({
   onDelete,
   onDownload,
   onRecreate,
+  onCorrectLabel,
 }: ImageDetailOverlayProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -51,7 +53,7 @@ export default function ImageDetailOverlay({
     });
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !document.querySelector('dialog[open]')) {
         if (isExpanded) {
           setIsExpanded(false);
         } else {
@@ -111,6 +113,7 @@ export default function ImageDetailOverlay({
           onDelete={onDelete}
           onDownload={onDownload}
           onRecreate={onRecreate}
+          onCorrectLabel={onCorrectLabel}
         />
       </div>
     </div>

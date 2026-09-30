@@ -26,6 +26,7 @@ interface ImageDetailPanelProps {
   onDelete: (id: string) => void;
   onDownload: (url: string, prompt: string) => void;
   onRecreate: (prompt: string) => void;
+  onCorrectLabel?: () => void;
 }
 
 const CloseIcon = () => (
@@ -159,6 +160,7 @@ export default function ImageDetailPanel({
   onDelete,
   onDownload,
   onRecreate,
+  onCorrectLabel,
 }: ImageDetailPanelProps) {
   const [isAdditionalOpen, setIsAdditionalOpen] = useState(false);
 
@@ -328,6 +330,16 @@ export default function ImageDetailPanel({
               <RecreateIcon />
               Recreate
             </button>
+
+            {onCorrectLabel && (
+              <button
+                type="button"
+                onClick={onCorrectLabel}
+                className="col-span-2 flex h-12 items-center justify-center rounded-full border border-[var(--base-color-brand--umber)]/60 bg-[var(--base-color-brand--shell)] text-sm font-semibold text-[var(--base-color-brand--bean)] focus-visible:outline-2"
+              >
+                Correct cake label
+              </button>
+            )}
 
             <button
               type="button"

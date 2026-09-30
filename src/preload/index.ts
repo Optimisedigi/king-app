@@ -16,6 +16,9 @@ const api = {
     save: (data: { url: string; prompt: string; aspectRatio: string; model?: ImageModelId }) =>
       ipcRenderer.invoke('images:save', data),
     cropCloseUp: (localUrl: string) => ipcRenderer.invoke('images:cropCloseUp', localUrl),
+    preview: (id: string) => ipcRenderer.invoke('images:preview', id),
+    approvedLabel: () => ipcRenderer.invoke('images:approvedLabel'),
+    saveApprovedLabel: (dataUrl: string) => ipcRenderer.invoke('images:saveApprovedLabel', dataUrl),
     delete: (id: string) => ipcRenderer.invoke('images:delete', id),
   },
   generate: {
