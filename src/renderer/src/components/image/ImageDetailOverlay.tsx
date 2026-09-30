@@ -9,6 +9,7 @@ interface ImageDetailOverlayProps {
   onDownload: (url: string, prompt: string) => void;
   onRecreate: (prompt: string) => void;
   onCorrectLabel?: () => void;
+  onNavigate?: (direction: -1 | 1) => void;
 }
 
 export default function ImageDetailOverlay({
@@ -18,6 +19,7 @@ export default function ImageDetailOverlay({
   onDownload,
   onRecreate,
   onCorrectLabel,
+  onNavigate,
 }: ImageDetailOverlayProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -53,18 +55,34 @@ export default function ImageDetailOverlay({
     });
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !document.querySelector('dialog[open]')) {
+      if (e.defaultPrevented || document.querySelector('dialog[open]')) return;
+      if (e.key === 'Escape') {
         if (isExpanded) {
           setIsExpanded(false);
         } else {
           handleClose();
         }
+      } else if (
+        onNavigate &&
+        (e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey &&
+        !(
+          e.target instanceof HTMLElement &&
+          (e.target.isContentEditable ||
+            e.target.closest('input, textarea, select, [role="slider"]'))
+        )
+      ) {
+        e.preventDefault();
+        onNavigate(e.key === 'ArrowLeft' ? -1 : 1);
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleClose, isExpanded]);
+  }, [handleClose, isExpanded, onNavigate]);
 
   return (
     <div

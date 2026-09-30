@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { toast } from 'sonner';
 import type { GeneratedImage } from './types';
 import {
   cropRoundLabel,
+  cropRectangleLabel,
   drawApprovedLabel,
   type LabelPlacement,
+  type LabelFeather,
   type MaskStroke,
 } from '@/lib/labelCompositor';
 import { cleanIpcError } from '@/lib/ipcError';
@@ -27,6 +29,34 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
+interface LabelCrop {
+  shape: 'circle' | 'rectangle';
+  x: number;
+  y: number;
+  size: number;
+  width: number;
+  height: number;
+}
+
+interface EditSnapshot {
+  crop: LabelCrop;
+  placement: LabelPlacement;
+  feather: LabelFeather;
+  erased: MaskStroke[];
+  eraseMode: boolean;
+  brushRadius: number;
+  brushPoint: { x: number; y: number };
+}
+
+const initialCrop: LabelCrop = {
+  shape: 'circle',
+  x: 0.5,
+  y: 0.5,
+  size: 0.4,
+  width: 0.4,
+  height: 0.4,
+};
+
 interface ApprovedLabelEditorProps {
   image: GeneratedImage;
   onClose: () => void;
@@ -45,13 +75,77 @@ export function ApprovedLabelEditor({
   const [source, setSource] = useState<HTMLImageElement | null>(null);
   const [label, setLabel] = useState<HTMLImageElement | null>(null);
   const [placement, setPlacement] = useState<LabelPlacement>(initialPlacement);
+  const [feather, setFeather] = useState<LabelFeather>({ left: 0, right: 0, top: 0, bottom: 0 });
   const [eraseMode, setEraseMode] = useState(false);
   const [brushRadius, setBrushRadius] = useState(0.012);
   const [brushPoint, setBrushPoint] = useState({ x: 0.5, y: 0.5 });
   const [erased, setErased] = useState<MaskStroke[]>([]);
-  const [crop, setCrop] = useState({ x: 0.5, y: 0.5, size: 0.4 });
+  const [crop, setCrop] = useState<LabelCrop>(initialCrop);
+  const undoHistory = useRef<EditSnapshot[]>([]);
+  const sliderGesture = useRef(false);
+  const [canUndo, setCanUndo] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  function rememberEdit(): void {
+    if (sliderGesture.current) return;
+    undoHistory.current = [
+      ...undoHistory.current.slice(-49),
+      {
+        crop,
+        placement,
+        feather,
+        erased,
+        eraseMode,
+        brushRadius,
+        brushPoint,
+      },
+    ];
+    setCanUndo(true);
+  }
+
+  function clearUndo(): void {
+    undoHistory.current = [];
+    setCanUndo(false);
+  }
+
+  const undoEdit = useCallback((): void => {
+    const previous = undoHistory.current.pop();
+    if (!previous) return;
+    setCrop(previous.crop);
+    setPlacement(previous.placement);
+    setFeather(previous.feather);
+    setErased(previous.erased);
+    setEraseMode(previous.eraseMode);
+    setBrushRadius(previous.brushRadius);
+    setBrushPoint(previous.brushPoint);
+    setCanUndo(undoHistory.current.length > 0);
+  }, []);
+
+  useEffect(() => {
+    const handleUndo = (event: KeyboardEvent): void => {
+      if (!dialogRef.current?.open || busy || event.defaultPrevented) return;
+      if (
+        !(event.metaKey || event.ctrlKey) ||
+        event.shiftKey ||
+        event.altKey ||
+        event.key.toLowerCase() !== 'z'
+      )
+        return;
+      if (
+        event.target instanceof HTMLElement &&
+        (event.target.isContentEditable ||
+          event.target.closest(
+            'textarea, input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="file"])',
+          ))
+      )
+        return;
+      event.preventDefault();
+      undoEdit();
+    };
+    document.addEventListener('keydown', handleUndo);
+    return () => document.removeEventListener('keydown', handleUndo);
+  }, [busy, undoEdit]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -106,11 +200,12 @@ export function ApprovedLabelEditor({
         label ? placement : { ...placement, width: 0 },
         760,
         erased,
+        feather,
       );
     } catch {
       toast.error('Could not draw the preview.');
     }
-  }, [background, label, placement, erased]);
+  }, [background, label, placement, erased, feather]);
 
   async function selectFile(file?: File): Promise<void> {
     if (!file) return;
@@ -127,7 +222,8 @@ export function ApprovedLabelEditor({
       if (loaded.naturalWidth * loaded.naturalHeight > 40_000_000)
         throw new Error('Choose a photo under 40 megapixels.');
       setSource(loaded);
-      setCrop({ x: 0.5, y: 0.5, size: 0.4 });
+      setCrop(initialCrop);
+      clearUndo();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not open the photo.');
     }
@@ -137,11 +233,15 @@ export function ApprovedLabelEditor({
     if (!source || busy) return;
     setBusy(true);
     try {
-      const png = cropRoundLabel(source, crop.x, crop.y, crop.size);
+      const png =
+        crop.shape === 'circle'
+          ? cropRoundLabel(source, crop.x, crop.y, crop.size)
+          : cropRectangleLabel(source, crop.x, crop.y, crop.width, crop.height);
       await window.api.images.saveApprovedLabel(png);
       setLabel(await loadImage(png));
       setErased([]);
       setSource(null);
+      clearUndo();
       toast.success('Approved label saved for reuse.');
     } catch (error) {
       toast.error(cleanIpcError(error, 'Could not save the label.'));
@@ -155,7 +255,7 @@ export function ApprovedLabelEditor({
     setBusy(true);
     try {
       const canvas = document.createElement('canvas');
-      drawApprovedLabel(canvas, background, label, placement, undefined, erased);
+      drawApprovedLabel(canvas, background, label, placement, undefined, erased, feather);
       const saved = await window.api.images.save({
         url: canvas.toDataURL('image/png'),
         prompt: `${image.prompt} (approved label)`,
@@ -177,6 +277,18 @@ export function ApprovedLabelEditor({
       ref={dialogRef}
       className="fixed inset-0 m-auto max-h-[100vh] w-[min(96vw,72rem)] max-w-[100vw] overflow-y-auto border-0 bg-transparent p-4 text-[var(--base-color-brand--bean)] backdrop:bg-[var(--base-color-brand--bean)]/90"
       aria-labelledby="approved-label-title"
+      onPointerDownCapture={(event) => {
+        if (!busy && event.target instanceof HTMLInputElement && event.target.type === 'range') {
+          rememberEdit();
+          sliderGesture.current = true;
+        }
+      }}
+      onPointerUpCapture={() => {
+        sliderGesture.current = false;
+      }}
+      onPointerCancelCapture={() => {
+        sliderGesture.current = false;
+      }}
       onCancel={(event) => {
         event.preventDefault();
         if (!busy) onClose();
@@ -187,12 +299,23 @@ export function ApprovedLabelEditor({
           <h2 id="approved-label-title" className="text-xl font-semibold">
             Correct cake label
           </h2>
-          <button type="button" className="btn-cinamon btn-sm" onClick={onClose} disabled={busy}>
-            Close
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn-cinamon btn-sm"
+              onClick={undoEdit}
+              disabled={busy || !canUndo}
+              title="Undo (⌘Z / Ctrl+Z)"
+            >
+              Undo
+            </button>
+            <button type="button" className="btn-cinamon btn-sm" onClick={onClose} disabled={busy}>
+              Close
+            </button>
+          </div>
         </header>
         <div className="grid min-h-0 gap-6 lg:grid-cols-[minmax(0,1fr)_270px]">
-          <div className="flex min-h-0 items-center justify-center rounded-xl bg-[var(--base-color-brand--bean)] p-2">
+          <div className="flex min-h-0 items-center justify-center rounded-xl bg-[var(--base-color-brand--bean)] p-2 lg:sticky lg:top-0 lg:self-start">
             {loading ? (
               <p className="text-white" role="status">
                 Opening image…
@@ -204,7 +327,8 @@ export function ApprovedLabelEditor({
                 aria-label="Preview of the corrected image. Review the label and any overlapping decorations before saving."
                 className="max-h-[70vh] max-w-full touch-none object-contain"
                 onPointerDown={(event) => {
-                  if (!label) return;
+                  if (!label || busy) return;
+                  rememberEdit();
                   event.currentTarget.setPointerCapture(event.pointerId);
                   if (eraseMode) {
                     const rect = event.currentTarget.getBoundingClientRect();
@@ -260,10 +384,31 @@ export function ApprovedLabelEditor({
             </label>
             {source && (
               <section className="space-y-2 rounded-xl border border-[var(--base-color-brand--umber)]/50 p-3">
-                <h3 className="font-semibold">Crop the round label</h3>
+                <h3 className="font-semibold">Crop the label</h3>
+                <fieldset className="flex items-center gap-3 text-sm" disabled={busy}>
+                  <legend className="sr-only">Crop shape</legend>
+                  {(['circle', 'rectangle'] as const).map((shape) => (
+                    <label key={shape} className="flex items-center gap-1">
+                      <input
+                        type="radio"
+                        name="label-crop-shape"
+                        value={shape}
+                        checked={crop.shape === shape}
+                        onChange={() => {
+                          rememberEdit();
+                          setCrop((current) => ({ ...current, shape }));
+                        }}
+                      />
+                      {shape === 'circle' ? 'Circle' : 'Rectangle'}
+                    </label>
+                  ))}
+                </fieldset>
                 <div
-                  className="relative mx-auto w-fit max-w-full cursor-crosshair touch-none"
+                  className="relative mx-auto w-fit max-w-full cursor-crosshair touch-none select-none"
                   onPointerDown={(event) => {
+                    if (busy) return;
+                    event.preventDefault();
+                    rememberEdit();
                     event.currentTarget.setPointerCapture(event.pointerId);
                     const rect = event.currentTarget.getBoundingClientRect();
                     setCrop((current) => ({
@@ -285,39 +430,49 @@ export function ApprovedLabelEditor({
                   <img
                     src={source.src}
                     alt="Source photo for label crop"
+                    draggable={false}
                     className="max-h-52 max-w-full"
                   />
                   <div
                     aria-hidden="true"
-                    className="pointer-events-none absolute rounded-full border-2 border-white shadow-[0_0_0_1px_black]"
+                    className={`pointer-events-none absolute border-2 border-white shadow-[0_0_0_1px_black] ${crop.shape === 'circle' ? 'rounded-full' : ''}`}
                     style={{
-                      left: `${(crop.x - (crop.size * Math.min(source.naturalWidth, source.naturalHeight)) / source.naturalWidth / 2) * 100}%`,
-                      top: `${(crop.y - (crop.size * Math.min(source.naturalWidth, source.naturalHeight)) / source.naturalHeight / 2) * 100}%`,
-                      width: `${((crop.size * Math.min(source.naturalWidth, source.naturalHeight)) / source.naturalWidth) * 100}%`,
-                      height: `${((crop.size * Math.min(source.naturalWidth, source.naturalHeight)) / source.naturalHeight) * 100}%`,
+                      left: `${(crop.x - (crop.shape === 'rectangle' ? crop.width : (crop.size * Math.min(source.naturalWidth, source.naturalHeight)) / source.naturalWidth) / 2) * 100}%`,
+                      top: `${(crop.y - (crop.shape === 'rectangle' ? crop.height : (crop.size * Math.min(source.naturalWidth, source.naturalHeight)) / source.naturalHeight) / 2) * 100}%`,
+                      width: `${(crop.shape === 'rectangle' ? crop.width : (crop.size * Math.min(source.naturalWidth, source.naturalHeight)) / source.naturalWidth) * 100}%`,
+                      height: `${(crop.shape === 'rectangle' ? crop.height : (crop.size * Math.min(source.naturalWidth, source.naturalHeight)) / source.naturalHeight) * 100}%`,
                     }}
                   />
                 </div>
-                {(['x', 'y', 'size'] as const).map((key) => (
+                {(crop.shape === 'circle'
+                  ? (['x', 'y', 'size'] as const)
+                  : (['x', 'y', 'width', 'height'] as const)
+                ).map((key) => (
                   <label key={key} className="block text-sm">
                     {key === 'x'
                       ? 'Centre left/right'
                       : key === 'y'
                         ? 'Centre up/down'
-                        : 'Circle size'}
+                        : key === 'size'
+                          ? 'Circle size'
+                          : key === 'width'
+                            ? 'Crop width'
+                            : 'Crop height'}
                     : {Math.round(crop[key] * 100)}%
                     <input
                       className={control}
                       type="range"
-                      min={key === 'size' ? 5 : 0}
+                      min={key === 'x' || key === 'y' ? 0 : 5}
                       max={100}
                       value={Math.round(crop[key] * 100)}
-                      onChange={(event) =>
+                      disabled={busy}
+                      onChange={(event) => {
+                        rememberEdit();
                         setCrop((current) => ({
                           ...current,
                           [key]: Number(event.target.value) / 100,
-                        }))
-                      }
+                        }));
+                      }}
                     />
                   </label>
                 ))}
@@ -348,7 +503,10 @@ export function ApprovedLabelEditor({
                   <input
                     type="checkbox"
                     checked={eraseMode}
-                    onChange={(event) => setEraseMode(event.target.checked)}
+                    onChange={(event) => {
+                      rememberEdit();
+                      setEraseMode(event.target.checked);
+                    }}
                   />
                   Reveal decorations in front of the label
                 </label>
@@ -363,7 +521,10 @@ export function ApprovedLabelEditor({
                         max="0.05"
                         step="0.002"
                         value={brushRadius}
-                        onChange={(event) => setBrushRadius(Number(event.target.value))}
+                        onChange={(event) => {
+                          rememberEdit();
+                          setBrushRadius(Number(event.target.value));
+                        }}
                       />
                     </label>
                     {(['x', 'y'] as const).map((axis) => (
@@ -376,24 +537,26 @@ export function ApprovedLabelEditor({
                           min="0"
                           max="100"
                           value={Math.round(brushPoint[axis] * 100)}
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            rememberEdit();
                             setBrushPoint((current) => ({
                               ...current,
                               [axis]: Number(event.target.value) / 100,
-                            }))
-                          }
+                            }));
+                          }}
                         />
                       </label>
                     ))}
                     <button
                       type="button"
                       className="btn-cinamon btn-sm"
-                      onClick={() =>
+                      onClick={() => {
+                        rememberEdit();
                         setErased((current) => [
                           ...current,
                           { radius: brushRadius, points: [brushPoint] },
-                        ])
-                      }
+                        ]);
+                      }}
                     >
                       Reveal at brush position
                     </button>
@@ -401,7 +564,10 @@ export function ApprovedLabelEditor({
                       type="button"
                       className="btn-cinamon btn-sm"
                       disabled={!erased.length}
-                      onClick={() => setErased((current) => current.slice(0, -1))}
+                      onClick={() => {
+                        rememberEdit();
+                        setErased((current) => current.slice(0, -1));
+                      }}
                     >
                       Undo last brush stroke
                     </button>
@@ -430,6 +596,7 @@ export function ApprovedLabelEditor({
                       max={max}
                       value={Math.round(placement[key] * factor)}
                       onChange={(event) => {
+                        rememberEdit();
                         setPlacement((current) => ({
                           ...current,
                           [key]: Number(event.target.value) / factor,
@@ -439,6 +606,30 @@ export function ApprovedLabelEditor({
                     />
                   </label>
                 ))}
+                <fieldset className="space-y-2" disabled={busy}>
+                  <legend className="font-semibold">Edge feather</legend>
+                  <p className="text-sm">Fade inward from each edge; 0% keeps it sharp.</p>
+                  {(['left', 'right', 'top', 'bottom'] as const).map((edge) => (
+                    <label key={edge} className="block text-sm">
+                      Feather {edge}: {feather[edge]}%
+                      <input
+                        type="range"
+                        className={control}
+                        min={0}
+                        max={50}
+                        step={1}
+                        value={feather[edge]}
+                        onChange={(event) => {
+                          rememberEdit();
+                          setFeather((current) => ({
+                            ...current,
+                            [edge]: Number(event.target.value),
+                          }));
+                        }}
+                      />
+                    </label>
+                  ))}
+                </fieldset>
                 <button
                   type="button"
                   className="btn-cinamon btn-sm"

@@ -12,6 +12,7 @@ import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import { ApprovedLabelEditor } from '@/components/image/ApprovedLabelEditor';
 import { useImages } from '@/hooks';
 import { useGenerationStore } from '@/stores/generationStore';
+import { useImagesStore } from '@/stores/imagesStore';
 import { cleanIpcError } from '@/lib/ipcError';
 import { CLOSE_UP_SOURCE_ANGLE_ID, CLOSE_UP_LABEL, type AngleShot } from '@/lib/productAngles';
 import {
@@ -81,6 +82,28 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     deleteImages,
     downloadImage: handleDownload,
   } = useImages();
+
+  const navigateImage = useCallback(
+    async (direction: -1 | 1): Promise<void> => {
+      if (!selectedImage) return;
+      const currentId = selectedImage.id;
+      let gallery = useImagesStore.getState();
+      let index = gallery.images.findIndex((item) => item.id === currentId);
+      if (index < 0) return;
+      if (direction === 1 && index === gallery.images.length - 1 && gallery.hasMore) {
+        if (gallery.isLoadingMore) return;
+        await gallery.loadMore();
+        gallery = useImagesStore.getState();
+        index = gallery.images.findIndex((item) => item.id === currentId);
+        if (index < 0) return;
+      }
+      const next = gallery.images[index + direction];
+      if (next) {
+        setSelectedImage((current) => (current?.id === currentId ? next : current));
+      }
+    },
+    [selectedImage],
+  );
 
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -450,6 +473,7 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
             setSelectedImage(null);
           }}
           onCorrectLabel={() => setLabelImage(selectedImage)}
+          onNavigate={(direction) => void navigateImage(direction)}
         />
       )}
 
