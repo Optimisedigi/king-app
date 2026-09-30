@@ -39,9 +39,12 @@ import type { EntityData, ImageModelId } from '@/types/electron';
 import type { ProductFolder } from '../../../shared/productFolders';
 import {
   ALL_PRODUCTS_VALUE,
+  SELECTED_GROUPS_VALUE,
   UNFILED_PRODUCTS_VALUE,
   isProductBatch,
   snapshotProductFolderTargets,
+  snapshotSelectedProductTargets,
+  type ManualProductGroup,
 } from '@/lib/productFolderTargets';
 import { MODEL_OPTIONS, useModelStore } from '@/stores/modelStore';
 import { CompositionTemplatePicker } from '@/components/composition/CompositionTemplatePicker';
@@ -115,6 +118,8 @@ export default function ImagePromptForm({
     useCompositionStore.getState().enterScope(selectedEntity);
   }, [selectedEntity]);
   const [selectedProductEntries, setSelectedProductEntries] = useState<string[]>([]);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+  const [manualGroups, setManualGroups] = useState<ManualProductGroup[]>([]);
   const selectedReferenceUrls = useRef<Set<string>>(new Set());
   const [imageCount, setImageCount] = useState(1);
   const [angleSet, setAngleSet] = useState(false);
@@ -280,6 +285,16 @@ export default function ImagePromptForm({
     ...folderOptions,
     ...(hasProducts
       ? [
+          { value: '_group_header', label: 'Select product groups for a batch', disabled: true },
+          ...products
+            .filter((p) => !p.pairedWith)
+            .map((p) => {
+              const linked = products.find((entry) => entry.pairedWith === p.id);
+              return {
+                value: `group:${p.id}`,
+                label: `Group: ${p.name}${linked ? ` + ${linked.name} (2 entries)` : ' (1 entry)'}`,
+              };
+            }),
           {
             value: '_entry_header',
             label: 'Tick entries to combine their photos into one image',
@@ -301,6 +316,8 @@ export default function ImagePromptForm({
     (value: string) => {
       selectedReferenceUrls.current = new Set();
       setSelectedProductEntries([]);
+      setSelectedGroupIds([]);
+      setManualGroups([]);
       setSelectedEntity(value);
 
       // A batch run pulls each product's own photos at submit time, so there
@@ -358,6 +375,77 @@ export default function ImagePromptForm({
     autoResizeTextarea();
   }, [prompt, autoResizeTextarea]);
 
+  function addManualGroup(): void {
+    const ids = selectedProductEntries.map((entry) => entry.slice('product:'.length));
+    if (!ids.length) return;
+    if (ids.some((id) => !products.some((entry) => entry.id === id))) {
+      toast.error('Product entries have changed. Refresh choices and select them again.');
+      return;
+    }
+    const selected = new Set(ids);
+    if (
+      ids.some((id) => {
+        const entry = products.find((item) => item.id === id);
+        return (
+          (entry?.pairedWith && !selected.has(entry.pairedWith)) ||
+          products.some((item) => item.pairedWith === id && !selected.has(item.id))
+        );
+      })
+    ) {
+      toast.error('Select both linked entries for this group.');
+      return;
+    }
+    if (
+      ids.some(
+        (id) =>
+          manualGroups.some((group) => group.ids.includes(id)) ||
+          selectedGroupIds.some(
+            (primary) =>
+              id === primary ||
+              products.some((entry) => entry.id === id && entry.pairedWith === primary),
+          ),
+      )
+    ) {
+      toast.error('An entry is already in a selected group.');
+      return;
+    }
+    const available = new Set(collectProductReferences(products, ids));
+    const urls = referenceImages.map((image) => image.url);
+    if (isImagesLoading || urls.some((url) => !url || !available.has(url))) {
+      toast.error('Use only saved product photos for a batch group.');
+      return;
+    }
+    const selectedUrls = urls.filter((url): url is string => !!url);
+    const max = usesComposition ? 7 : MAX_REFERENCE_IMAGES;
+    if (!selectedUrls.length || selectedUrls.length > max) {
+      toast.error(
+        `Choose 1–${max} product photos for this group. Remove extra photos from the preview.`,
+      );
+      return;
+    }
+    setManualGroups([...manualGroups, { ids, referenceImages: selectedUrls }]);
+    setSelectedProductEntries([]);
+    selectedReferenceUrls.current = new Set();
+    setReferenceImages([]);
+    setSelectedEntity(SELECTED_GROUPS_VALUE);
+  }
+
+  function toggleProductGroup(value: string): void {
+    const id = value.slice('group:'.length);
+    if (!products.some((product) => product.id === id && !product.pairedWith)) return;
+    if (manualGroups.some((group) => group.ids.includes(id))) {
+      toast.error('An entry is already in a selected group.');
+      return;
+    }
+    const next = selectedEntity === SELECTED_GROUPS_VALUE ? selectedGroupIds : [];
+    setSelectedGroupIds(next.includes(id) ? next.filter((item) => item !== id) : [...next, id]);
+    if (selectedEntity !== SELECTED_GROUPS_VALUE) setManualGroups([]);
+    setSelectedProductEntries([]);
+    selectedReferenceUrls.current = new Set();
+    setReferenceImages([]);
+    setSelectedEntity(SELECTED_GROUPS_VALUE);
+  }
+
   function toggleProductReference(value: string): void {
     const product = products.find((entry) => `product:${entry.id}` === value);
     const primaryId = product?.pairedWith ?? product?.id;
@@ -398,8 +486,14 @@ export default function ImagePromptForm({
         );
       selectedReferenceUrls.current = new Set(urls.filter((url) => !extraUrls.has(url)));
       setReferenceImages(merged);
+      if (selectedEntity !== SELECTED_GROUPS_VALUE) {
+        setSelectedGroupIds([]);
+        setManualGroups([]);
+      }
       setSelectedProductEntries(next);
-      setSelectedEntity(next[0] ?? 'none');
+      setSelectedEntity(
+        selectedEntity === SELECTED_GROUPS_VALUE ? SELECTED_GROUPS_VALUE : (next[0] ?? 'none'),
+      );
     } catch (cause) {
       toast.error(
         cause instanceof Error ? cause.message : 'Could not select these product references.',
@@ -423,6 +517,8 @@ export default function ImagePromptForm({
       setPrompt(recreateData.prompt);
       selectedReferenceUrls.current = new Set();
       setSelectedProductEntries([]);
+      setSelectedGroupIds([]);
+      setManualGroups([]);
       setSelectedEntity('none');
       setReferenceImages([]);
     }
@@ -435,6 +531,8 @@ export default function ImagePromptForm({
     setPrompt('');
     selectedReferenceUrls.current = new Set();
     setSelectedProductEntries([]);
+    setSelectedGroupIds([]);
+    setManualGroups([]);
     setSelectedEntity('none');
     setReferenceImages([
       {
@@ -568,6 +666,10 @@ export default function ImagePromptForm({
     // A batch run turns every saved product into its own target, carrying that
     // product's reference photos.
     const isBatch = isProductBatch(selectedEntity);
+    if (isBatch && selectedProductEntries.length) {
+      toast.error('Add the ticked entries as a group before generating. No images were queued.');
+      return;
+    }
 
     // A batch spans many product types, so there is no single one to
     // substitute into the prompt.
@@ -598,7 +700,7 @@ export default function ImagePromptForm({
     }
 
     const snapshot = composition ? structuredClone(composition) : undefined;
-    if (selectedProductEntries.length) {
+    if (selectedProductEntries.length && !isBatch) {
       const selectedSavedUrls = [...selectedReferenceUrls.current];
       const maxReferences = usesComposition ? 7 : MAX_REFERENCE_IMAGES;
       if (uploadedImageUrls.length > maxReferences) {
@@ -660,21 +762,29 @@ export default function ImagePromptForm({
           setFolders(freshFolders);
           setFolderError(null);
         }
-        const batch = snapshotProductFolderTargets(
-          selectedEntity,
-          freshProducts,
-          freshFolders,
-          usesComposition,
-        );
+        const batch =
+          selectedEntity === SELECTED_GROUPS_VALUE
+            ? snapshotSelectedProductTargets(
+                selectedGroupIds,
+                freshProducts,
+                usesComposition,
+                manualGroups,
+              )
+            : snapshotProductFolderTargets(
+                selectedEntity,
+                freshProducts,
+                freshFolders,
+                usesComposition,
+              );
         batchTargets = batch.targets.map((target) => {
           const sourceName = sourceNameForReferences(target.referenceImages, freshProducts);
           return sourceName ? { ...target, sourceName } : target;
         });
         batchScope = batch.scope;
         const targetIds = new Set(batchTargets.map((target) => target.key));
-        hasPairedTargets = freshProducts.some(
-          (product) => product.pairedWith && targetIds.has(product.pairedWith),
-        );
+        hasPairedTargets =
+          manualGroups.some((group) => group.ids.length > 1) ||
+          freshProducts.some((product) => product.pairedWith && targetIds.has(product.pairedWith));
       } catch (error) {
         toast.error(
           error instanceof Error ? error.message : 'Could not refresh this batch. Retry Generate.',
@@ -970,8 +1080,18 @@ export default function ImagePromptForm({
                 options={entityOptions}
                 value={selectedEntity}
                 selectedProducts={selectedProductEntries}
+                selectedGroups={selectedGroupIds}
+                manualGroups={manualGroups.map(
+                  (group) =>
+                    `${group.ids.map((id) => products.find((p) => p.id === id)?.name ?? 'Unavailable').join(' + ')} (${group.referenceImages.length} photos)`,
+                )}
+                onAddGroup={addManualGroup}
+                onRemoveGroup={(index) =>
+                  setManualGroups((groups) => groups.filter((_, i) => i !== index))
+                }
                 onScopeChange={handleEntityChange}
                 onToggleProduct={toggleProductReference}
+                onToggleGroup={toggleProductGroup}
               />
             </Hint>
             <Hint text={folderError ?? 'Reload products and folders'}>

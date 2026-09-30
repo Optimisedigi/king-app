@@ -1,22 +1,32 @@
 import { useEffect, useId, useRef, useState, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckIcon, ChevronDownIcon } from '@/components/icons';
-import { isProductBatch } from '@/lib/productFolderTargets';
+import { isProductBatch, SELECTED_GROUPS_VALUE } from '@/lib/productFolderTargets';
 
 interface ProductReferencePickerProps {
   options: { value: string; label: string; disabled?: boolean }[];
   value: string;
   selectedProducts: readonly string[];
+  selectedGroups: readonly string[];
+  manualGroups: readonly string[];
+  onAddGroup: () => void;
+  onRemoveGroup: (index: number) => void;
   onScopeChange: (value: string) => void;
   onToggleProduct: (value: string) => void;
+  onToggleGroup: (value: string) => void;
 }
 
 export function ProductReferencePicker({
   options,
   value,
   selectedProducts,
+  selectedGroups,
+  manualGroups,
+  onAddGroup,
+  onRemoveGroup,
   onScopeChange,
   onToggleProduct,
+  onToggleGroup,
 }: ProductReferencePickerProps): ReactElement {
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -27,10 +37,13 @@ export function ProductReferencePicker({
     width: number;
     maxHeight: number;
   } | null>(null);
+  const groupCount = selectedGroups.length + manualGroups.length;
   const label =
-    selectedProducts.length > 1
-      ? `${selectedProducts.length} reference entries · one product`
-      : (options.find((option) => option.value === value)?.label ?? 'Default');
+    value === SELECTED_GROUPS_VALUE
+      ? `${groupCount} selected product ${groupCount === 1 ? 'group' : 'groups'}`
+      : selectedProducts.length > 1
+        ? `${selectedProducts.length} reference entries · one product`
+        : (options.find((option) => option.value === value)?.label ?? 'Default');
   function close(restoreFocus = false): void {
     setPosition(null);
     if (restoreFocus) trigger.current?.focus();
@@ -123,8 +136,8 @@ export function ProductReferencePicker({
             }}
           >
             <p id={`${listId}-help`} className="px-2 pb-2 text-xs">
-              Pick a folder to make one image per product in it. Tick entries only to combine their
-              photos into one image.
+              Pick a folder to make one image per product in it. Or tick saved groups, or tick
+              entries and choose Add as batch group. A composition allows up to 7 photos per group.
             </p>
             <div
               id={listId}
@@ -134,6 +147,25 @@ export function ProductReferencePicker({
               aria-describedby={`${listId}-help`}
               className="min-h-0 overflow-y-auto"
             >
+              {manualGroups.map((name, index) => (
+                <button
+                  key={`manual:${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected="true"
+                  tabIndex={-1}
+                  onClick={() => onRemoveGroup(index)}
+                  className="flex min-h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-[var(--base-color-brand--shell)] focus-visible:outline-2"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="grid size-5 shrink-0 place-items-center rounded border border-[var(--base-color-brand--umber)]"
+                  >
+                    <CheckIcon />
+                  </span>
+                  <span className="min-w-0 break-words">Group: {name} (remove)</span>
+                </button>
+              ))}
               {options.map((option) => {
                 if (option.disabled)
                   return (
@@ -147,9 +179,14 @@ export function ProductReferencePicker({
                   );
                 const product =
                   option.value.startsWith('product:') && !isProductBatch(option.value);
+                const group =
+                  option.value.startsWith('group:') && option.value !== SELECTED_GROUPS_VALUE;
                 const checked = product
                   ? selectedProducts.includes(option.value)
-                  : value === option.value;
+                  : group
+                    ? value === SELECTED_GROUPS_VALUE &&
+                      selectedGroups.includes(option.value.slice('group:'.length))
+                    : value === option.value;
                 return (
                   <button
                     key={option.value}
@@ -159,6 +196,7 @@ export function ProductReferencePicker({
                     tabIndex={-1}
                     onClick={() => {
                       if (product) onToggleProduct(option.value);
+                      else if (group) onToggleGroup(option.value);
                       else {
                         onScopeChange(option.value);
                         close(true);
@@ -168,7 +206,7 @@ export function ProductReferencePicker({
                   >
                     <span
                       aria-hidden="true"
-                      className={`grid size-5 shrink-0 place-items-center ${product ? 'rounded border border-[var(--base-color-brand--umber)]' : ''}`}
+                      className={`grid size-5 shrink-0 place-items-center ${product || group ? 'rounded border border-[var(--base-color-brand--umber)]' : ''}`}
                     >
                       {checked && <CheckIcon />}
                     </span>
@@ -177,6 +215,16 @@ export function ProductReferencePicker({
                 );
               })}
             </div>
+            {selectedProducts.length > 0 && (
+              <button
+                type="button"
+                onClick={onAddGroup}
+                className="mt-2 min-h-10 shrink-0 rounded-full border border-[var(--base-color-brand--umber)] bg-[var(--base-color-brand--shell)] px-4 text-sm font-semibold focus-visible:outline-2"
+              >
+                Add {selectedProducts.length} {selectedProducts.length === 1 ? 'entry' : 'entries'}{' '}
+                as batch group
+              </button>
+            )}
             <button
               type="button"
               onClick={() => close(true)}

@@ -4,6 +4,8 @@ import {
   UNFILED_PRODUCTS_VALUE,
   isProductBatch,
   snapshotProductFolderTargets as snapshot,
+  snapshotSelectedProductTargets,
+  SELECTED_GROUPS_VALUE,
 } from '../../../src/renderer/src/lib/productFolderTargets';
 import { buildGenerationJobs } from '../../../src/renderer/src/lib/generationJobs';
 import type { EntityData } from '../../../src/renderer/src/types/electron';
@@ -131,6 +133,109 @@ describe('product folder targets', () => {
     expect(
       snapshot(ALL_PRODUCTS_VALUE, products, [], false).targets[0]?.referenceImages,
     ).toHaveLength(8);
+  });
+
+  it('runs only selected groups, combining linked photos per product rather than across the batch', () => {
+    const products = [
+      product('cake', undefined, ['front.png', 'side.png']),
+      { ...product('cake-top', undefined, ['top.png']), pairedWith: 'cake' },
+      product('cookie', undefined, ['cookie.png']),
+      product(
+        'other',
+        undefined,
+        Array.from({ length: 8 }, (_, i) => `other-${i}.png`),
+      ),
+    ];
+    const result = snapshotSelectedProductTargets(['cake', 'cookie'], products, true);
+    expect(result.targets).toEqual([
+      { key: 'cake', label: 'Same name', referenceImages: ['front.png', 'side.png', 'top.png'] },
+      { key: 'cookie', label: 'Same name', referenceImages: ['cookie.png'] },
+    ]);
+    expect(
+      buildGenerationJobs({
+        targets: result.targets,
+        count: 1,
+        basePrompt: 'Scene',
+        idPrefix: 'test',
+      }),
+    ).toHaveLength(2);
+    expect(
+      snapshotSelectedProductTargets(['other'], products, true).targets[0]?.referenceImages,
+    ).toHaveLength(8);
+    expect(() => snapshotSelectedProductTargets(['missing'], products, true)).toThrow('changed');
+    expect(() => snapshotSelectedProductTargets(['cake-top'], products, true)).toThrow('changed');
+    expect(isProductBatch(SELECTED_GROUPS_VALUE)).toBe(true);
+  });
+
+  it('keeps manually selected entries together as one target per group and rejects stale or duplicate selections', () => {
+    const products = [
+      product('front', undefined, ['front.png']),
+      product('side', undefined, ['side.png']),
+      product('cookie', undefined, ['cookie.png']),
+    ];
+    const result = snapshotSelectedProductTargets([], products, true, [
+      { ids: ['front', 'side'], referenceImages: ['front.png', 'side.png'] },
+      { ids: ['cookie'], referenceImages: ['cookie.png'] },
+    ]);
+    expect(result.targets.map((target) => target.referenceImages)).toEqual([
+      ['front.png', 'side.png'],
+      ['cookie.png'],
+    ]);
+    expect(result.targets.map((target) => target.key)).toEqual(['front', 'cookie']);
+    expect(() =>
+      snapshotSelectedProductTargets([], products, true, [
+        { ids: ['front', 'missing'], referenceImages: ['front.png'] },
+      ]),
+    ).toThrow('changed');
+    expect(() =>
+      snapshotSelectedProductTargets(['front'], products, true, [
+        { ids: ['front', 'side'], referenceImages: ['front.png', 'side.png'] },
+      ]),
+    ).toThrow('already');
+    expect(() =>
+      snapshotSelectedProductTargets([], products, true, [
+        { ids: ['front'], referenceImages: ['front.png'] },
+        { ids: ['front'], referenceImages: ['front.png'] },
+      ]),
+    ).toThrow('already');
+    expect(() =>
+      snapshotSelectedProductTargets([], products, true, [
+        { ids: ['front', 'side', 'cookie', 'front'], referenceImages: ['front.png'] },
+      ]),
+    ).toThrow('already');
+    expect(() =>
+      snapshotSelectedProductTargets([], products, true, [
+        { ids: ['front', 'side'], referenceImages: ['missing.png'] },
+      ]),
+    ).toThrow('photos have changed');
+    expect(
+      snapshotSelectedProductTargets([], products, true, [
+        { ids: ['front', 'side'], referenceImages: ['side.png'] },
+      ]).targets[0]?.referenceImages,
+    ).toEqual(['side.png']);
+    const linked = [
+      product(
+        'cake',
+        undefined,
+        Array.from({ length: 7 }, (_, i) => `front-${i}`),
+      ),
+      { ...product('top', undefined, ['top.png']), pairedWith: 'cake' },
+    ];
+    expect(
+      snapshotSelectedProductTargets([], linked, true, [
+        { ids: ['cake', 'top'], referenceImages: ['front-0', 'top.png'] },
+      ]).targets[0]?.referenceImages,
+    ).toEqual(['front-0', 'top.png']);
+    expect(() =>
+      snapshotSelectedProductTargets([], linked, true, [
+        { ids: ['cake', 'top'], referenceImages: [...linked[0]!.referenceImages, 'top.png'] },
+      ]),
+    ).toThrow('1–7');
+    expect(() =>
+      snapshotSelectedProductTargets([], linked, true, [
+        { ids: ['cake'], referenceImages: ['front-0'] },
+      ]),
+    ).toThrow('linked entry');
   });
 
   it('keeps All products across every folder and Unfiled, independently of folder list availability', () => {
