@@ -897,7 +897,7 @@ async function run() {
     const twoAngleRun = await evaluate(`({
       prompts: window.generateRequests.map(r => r.prompt),
       crops: window.cropRequests,
-      saved: window.saveRequests.slice(${savesBeforeTwo}).length,
+      saved: window.saveRequests.slice(${savesBeforeTwo}).map(r => r.url),
     })`);
     assert.equal(
       twoAngleRun.prompts.length,
@@ -914,7 +914,11 @@ async function run() {
       ['local-file:///entities/45.png'],
       'The close-up is cropped from that 45° image',
     );
-    assert.equal(twoAngleRun.saved, 2, 'The 45° image and its close-up are both saved');
+    assert.deepEqual(
+      twoAngleRun.saved,
+      ['local-file:///entities/45.png', 'data:image/png;base64,Q0xPU0U='],
+      'The 45° image and its close-up are both saved',
+    );
     await evaluate(`${twoAngles}.click()`);
     await waitFor(`${twoAngles}.getAttribute('aria-pressed') === 'false'`);
     console.log('PASS 2 angles makes the 45° shot and its cropped close-up only');
