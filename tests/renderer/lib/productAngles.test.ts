@@ -39,7 +39,9 @@ describe('product angles', () => {
     expect(elevated?.instruction).toContain('boundary is visible');
     expect(elevated?.instruction).toContain('downward toward the right');
     expect(elevated?.instruction).toContain('Keep the product and tabletop physically level');
-    expect(elevated?.instruction).toContain('follow that reference instead');
+    expect(elevated?.instruction).toContain(
+      'reference or boundary guide shows a different boundary, follow it instead',
+    );
     expect(eyeLevel?.instruction).not.toContain('downward toward the right');
     expect(COMPOSITION_CAMERAS['elevated-45']).toBe(ELEVATED_45_CAMERA);
     expect(ELEVATED_45_CAMERA).toContain('downward toward the right');

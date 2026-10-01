@@ -21,7 +21,10 @@ export interface CropRect {
   height: number;
 }
 export interface CompositionGuides {
+  /** Wall/table boundary height at the left edge; a level line when no right edge is set. */
   boundaryY?: number;
+  /** Boundary height at the right edge, for an angled background. Requires `boundaryY`. */
+  boundaryRightY?: number;
   centreX: number;
   baseY: number;
   width: number;
@@ -81,6 +84,8 @@ export function validGuides(value: unknown): value is CompositionGuides {
     unit(value.width) &&
     value.width > 0 &&
     (value.boundaryY === undefined || unit(value.boundaryY)) &&
+    (value.boundaryRightY === undefined ||
+      (value.boundaryY !== undefined && unit(value.boundaryRightY))) &&
     value.centreX - value.width / 2 >= 0 &&
     value.centreX + value.width / 2 <= 1
   );

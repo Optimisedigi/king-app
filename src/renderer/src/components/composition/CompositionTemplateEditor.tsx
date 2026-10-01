@@ -262,7 +262,13 @@ function AngleEditor({
             onChange({
               source: normalized.result,
               crop: { x: (1 - width) / 2, y: (1 - height) / 2, width, height },
-              guides: { centreX: 0.5, baseY: 0.8, width: 0.6, boundaryY: 0.45 },
+              guides: {
+                centreX: 0.5,
+                baseY: 0.8,
+                width: 0.6,
+                boundaryY: 0.45,
+                boundaryRightY: 0.45,
+              },
             });
           };
           normalized.readAsDataURL(blob);
@@ -281,6 +287,9 @@ function AngleEditor({
     const current = settings;
     if (!current) return;
     const guides = { ...current.guides, [key]: value };
+    // A single-height line follows its left edge; pin the right end so moving the left tilts it.
+    if (key === 'boundaryY' && current.guides.boundaryRightY === undefined)
+      guides.boundaryRightY = current.guides.boundaryY ?? value;
     if (key === 'centreX')
       guides.centreX = Math.max(guides.width / 2, Math.min(1 - guides.width / 2, value));
     if (key === 'width')
@@ -290,6 +299,12 @@ function AngleEditor({
       );
     onChange({ ...current, guides });
   }
+  // Without a right edge the boundary is level, as in templates saved before angled lines.
+  const boundaryLeft = settings?.guides.boundaryY;
+  const boundary =
+    boundaryLeft === undefined
+      ? null
+      : { left: boundaryLeft, right: settings?.guides.boundaryRightY ?? boundaryLeft };
   function crop(update: Partial<CropRect>): void {
     if (settings) onChange({ ...settings, crop: { ...settings.crop, ...update } });
   }
@@ -348,31 +363,19 @@ function AngleEditor({
               preserveAspectRatio="none"
               className="absolute inset-0 h-full w-full"
             >
-              {(
-                [
-                  'centreX',
-                  'baseY',
-                  'width',
-                  ...(settings.guides.boundaryY === undefined ? [] : ['boundaryY']),
-                ] as (keyof CompositionGuides)[]
-              ).map((key) => {
+              {(['centreX', 'baseY', 'width'] as const).map((key) => {
                 const vertical = key === 'centreX' || key === 'width';
                 const position =
                   key === 'width'
                     ? settings.guides.centreX + settings.guides.width / 2
-                    : (settings.guides[key] ?? 0);
+                    : settings.guides[key];
                 const props = vertical
                   ? { x1: position * 100, x2: position * 100, y1: 0, y2: 100 }
                   : { x1: 0, x2: 100, y1: position * 100, y2: position * 100 };
                 return (
                   <g key={key}>
                     <line {...props} stroke="white" strokeWidth="1" />
-                    <line
-                      {...props}
-                      stroke="black"
-                      strokeWidth="0.4"
-                      strokeDasharray={key === 'boundaryY' ? '2 2' : undefined}
-                    />
+                    <line {...props} stroke="black" strokeWidth="0.4" />
                     <line
                       {...props}
                       stroke="transparent"
@@ -386,11 +389,58 @@ function AngleEditor({
                   </g>
                 );
               })}
+              {boundary && (
+                <g>
+                  <line
+                    x1={0}
+                    x2={100}
+                    y1={boundary.left * 100}
+                    y2={boundary.right * 100}
+                    stroke="white"
+                    strokeWidth="1"
+                  />
+                  <line
+                    x1={0}
+                    x2={100}
+                    y1={boundary.left * 100}
+                    y2={boundary.right * 100}
+                    stroke="black"
+                    strokeWidth="0.4"
+                    strokeDasharray="2 2"
+                  />
+                  {/* Each half of the line moves its own edge, so the slope can be dragged. */}
+                  {(
+                    [
+                      ['boundaryY', 0, 50],
+                      ['boundaryRightY', 50, 100],
+                    ] as const
+                  ).map(([key, x1, x2]) => {
+                    const at = (x: number): number =>
+                      (boundary.left + ((boundary.right - boundary.left) * x) / 100) * 100;
+                    return (
+                      <line
+                        key={key}
+                        x1={x1}
+                        x2={x2}
+                        y1={at(x1)}
+                        y2={at(x2)}
+                        stroke="transparent"
+                        strokeWidth="6"
+                        className="cursor-ns-resize"
+                        onPointerDown={(event) => {
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                          setDrag(key);
+                        }}
+                      />
+                    );
+                  })}
+                </g>
+              )}
             </svg>
           </div>
           <p className="text-xs">
             Drag the guides or use the percentage controls. Y is measured from the top. Dashed line:
-            wall/table boundary.
+            wall/table boundary. Drag its left or right half to tilt it for an angled background.
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <Percentage
@@ -416,22 +466,34 @@ function AngleEditor({
               <label className="flex min-h-10 items-center gap-2 text-sm">
                 <input
                   type="checkbox"
-                  checked={settings.guides.boundaryY !== undefined}
+                  checked={boundary !== null}
                   onChange={(event) => {
                     const guides = { ...settings.guides };
-                    if (event.target.checked) guides.boundaryY = 0.45;
-                    else delete guides.boundaryY;
+                    if (event.target.checked) {
+                      guides.boundaryY = 0.45;
+                      guides.boundaryRightY = 0.45;
+                    } else {
+                      delete guides.boundaryY;
+                      delete guides.boundaryRightY;
+                    }
                     onChange({ ...settings, guides });
                   }}
                 />
                 Wall/table boundary
               </label>
-              {settings.guides.boundaryY !== undefined && (
-                <Percentage
-                  label="Boundary Y"
-                  value={settings.guides.boundaryY}
-                  onChange={(value) => guide('boundaryY', value)}
-                />
+              {boundary && (
+                <div className="space-y-3">
+                  <Percentage
+                    label="Boundary at left edge Y"
+                    value={boundary.left}
+                    onChange={(value) => guide('boundaryY', value)}
+                  />
+                  <Percentage
+                    label="Boundary at right edge Y"
+                    value={boundary.right}
+                    onChange={(value) => guide('boundaryRightY', value)}
+                  />
+                </div>
               )}
             </div>
           </div>

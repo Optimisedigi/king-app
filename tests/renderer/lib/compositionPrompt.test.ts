@@ -51,6 +51,29 @@ describe('composition requests', () => {
       'wall/table boundary',
     );
   });
+  it('describes an angled wall boundary by its left and right edges', () => {
+    const value = template();
+    const guides = value.angles['elevated-45']?.guides;
+    if (guides) guides.boundaryRightY = 0.25;
+    const prompt = buildCompositionRequest('', ['own'], value, 'elevated-45').prompt;
+    expect(prompt).toContain('from Y 40.0% at the left edge to Y 25.0% at the right edge');
+    expect(prompt).not.toContain('Place the wall/table boundary at Y');
+  });
+  it('states a level boundary explicitly when both edges match, overriding the 45° default slope', () => {
+    const value = template();
+    const guides = value.angles['elevated-45']?.guides;
+    if (guides) guides.boundaryRightY = 0.4;
+    const prompt = buildCompositionRequest('', ['own'], value, 'elevated-45').prompt;
+    expect(prompt).toContain(
+      'Run the wall/table boundary as a level, horizontal line at Y 40.0% measured from the top, not a diagonal.',
+    );
+    expect(prompt).not.toContain('right edge');
+  });
+  it('keeps the original wording for templates saved with a single boundary height', () => {
+    const prompt = buildCompositionRequest('', ['own'], template(), 'elevated-45').prompt;
+    expect(prompt).toContain('Place the wall/table boundary at Y 40.0% measured from the top.');
+    expect(prompt).not.toContain('horizontal line');
+  });
   it('preflights all products and missing angles', () => {
     expect(() =>
       preflightComposition({

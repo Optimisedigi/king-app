@@ -6,6 +6,13 @@ describe('composition geometry', () => {
     expect(validGuides({ centreX: 0.5, baseY: 0.8, width: 0.6 })).toBe(true);
     expect(validGuides({ centreX: 0.5, baseY: 0.8, width: 0.6, boundaryY: 0.4 })).toBe(true);
   });
+  it('accepts an angled boundary only alongside its left edge', () => {
+    const base = { centreX: 0.5, baseY: 0.8, width: 0.6 };
+    expect(validGuides({ ...base, boundaryY: 0.5, boundaryRightY: 0.3 })).toBe(true);
+    expect(validGuides({ ...base, boundaryRightY: 0.3 })).toBe(false);
+    expect(validGuides({ ...base, boundaryY: 0.5, boundaryRightY: 1.2 })).toBe(false);
+    expect(validGuides({ ...base, boundaryY: 0.5, boundaryRightY: NaN })).toBe(false);
+  });
   it.each([NaN, Infinity, -0.1, 1.1])('rejects invalid coordinates %s', (value) => {
     expect(validGuides({ centreX: value, baseY: 0.8, width: 0.6 })).toBe(false);
     expect(validCrop({ x: value, y: 0, width: 0.5, height: 1 })).toBe(false);

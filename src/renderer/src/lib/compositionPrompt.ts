@@ -1,5 +1,6 @@
 import {
   validateTemplate,
+  type CompositionGuides,
   type ShootAngle,
   type ShootTemplate,
 } from '../../../shared/shootTemplates';
@@ -13,6 +14,19 @@ export const COMPOSITION_CAMERAS: Record<ShootAngle, string> = {
 };
 function percent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
+}
+function boundaryInstruction(guides: CompositionGuides): string {
+  const left = guides.boundaryY;
+  if (left === undefined) return '';
+  const right = guides.boundaryRightY;
+  // Templates saved with one height keep their original wording, so their results don't change.
+  if (right === undefined)
+    return ` Place the wall/table boundary at Y ${percent(left)} measured from the top.`;
+  // Below a tenth of a percent the two edges print as the same number, so treat it as level.
+  // Say so explicitly: the 45° camera otherwise asks for a downward slope.
+  if (Math.abs(right - left) < 0.001)
+    return ` Run the wall/table boundary as a level, horizontal line at Y ${percent(left)} measured from the top, not a diagonal.`;
+  return ` Run the wall/table boundary as a straight diagonal line from Y ${percent(left)} at the left edge to Y ${percent(right)} at the right edge, measured from the top.`;
 }
 export function buildCompositionRequest(
   basePrompt: string,
@@ -36,7 +50,7 @@ export function buildCompositionRequest(
   const { guides } = settings;
   const count = productReferences.length;
   const roles = `${count === 1 ? 'Image 1 defines' : `Images 1–${count} define`} the product. Image ${count + 1} defines composition, camera framing, background, surface and light only. Do not copy its product, decoration, branding or text. Use all product photos as complementary views of one product. Follow the requested camera angle and composition reference for perspective, not the camera viewpoints in the product photos.`;
-  const framing = `In the final ${template.aspectRatio} frame, place the product centre at X ${percent(guides.centreX)}, its base at Y ${percent(guides.baseY)} measured from the top, and its apparent width at ${percent(guides.width)} of frame width.${guides.boundaryY === undefined ? '' : ` Place the wall/table boundary at Y ${percent(guides.boundaryY)} measured from the top.`}`;
+  const framing = `In the final ${template.aspectRatio} frame, place the product centre at X ${percent(guides.centreX)}, its base at Y ${percent(guides.baseY)} measured from the top, and its apparent width at ${percent(guides.width)} of frame width.${boundaryInstruction(guides)}`;
   const prompt = `${basePrompt.trim()}\n\n${roles}\n\n${COMPOSITION_CAMERAS[angle]} ${framing}\n\nRender a natural full scene using the composition image as the source of the background, surface and lighting, with consistent lighting and realistic contact shadows. Preserve the target product's true shape, proportions, colour, details, decoration, packaging, text and logos from the product photos. Do not restyle, add or remove product details. These are framing targets: never stretch or distort the product to fit a rectangle. Keep the entire product in frame. Composition guides are approximate, not a pixel lock.`;
   if (prompt.length > 32000)
     throw new Error('The final composition prompt exceeds 32,000 characters. Shorten your prompt.');
