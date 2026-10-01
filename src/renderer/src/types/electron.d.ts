@@ -217,6 +217,15 @@ export interface ElectronAPI {
       provider?: 'openai-api' | 'openai-oauth' | 'fal';
       modelVariant?: ImageModelId;
     }) => Promise<{ success: boolean; resultUrls?: string[]; error?: string }>;
+    /** Rewrites a draft into a precise image prompt with GPT-6 Luna. */
+    enhancePrompt: (data: {
+      prompt: string;
+      aspectRatio: string;
+      hasProductPhotos: boolean;
+      framingControlled: boolean;
+      imageModel: string;
+      provider?: 'openai-api' | 'openai-oauth' | 'fal';
+    }) => Promise<{ success: true; prompt: string } | { success: false; error: string }>;
   };
   files: {
     download: (

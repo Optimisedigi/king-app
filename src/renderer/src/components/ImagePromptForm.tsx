@@ -673,9 +673,46 @@ export default function ImagePromptForm({
 
   const isImagesLoading = referenceImages.some((img) => img.isLoading);
 
+  // Enhance rewrites the draft into a precise image prompt (GPT-6 Luna, in main).
+  const [enhancing, setEnhancing] = useState(false);
+  const canEnhance =
+    availableProviders.includes('openai-api') || availableProviders.includes('openai-oauth');
+  const handleEnhance = async (): Promise<void> => {
+    const draft = prompt;
+    if (enhancing || !draft.trim()) return;
+    setEnhancing(true);
+    try {
+      const result = await window.api.generate.enhancePrompt({
+        prompt: draft,
+        aspectRatio: effectiveAspect,
+        hasProductPhotos: referenceImages.length > 0 || selectedEntity !== 'none',
+        framingControlled: angleSet || usesComposition,
+        imageModel: MODEL_OPTIONS.find((m) => m.value === modelVariant)?.label ?? 'GPT Image 2',
+        provider,
+      });
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      // Keep the user's typing if they edited the draft while it was rewritten.
+      if (textareaRef.current && textareaRef.current.value !== draft) {
+        toast.info('Prompt changed while enhancing, so it was kept as you typed it.');
+        return;
+      }
+      setPrompt(result.prompt);
+      toast.success('Prompt enhanced', {
+        action: { label: 'Undo', onClick: () => setPrompt(draft) },
+      });
+    } catch {
+      toast.error('Could not enhance the prompt. Your prompt was kept as it was.');
+    } finally {
+      setEnhancing(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    if (isImagesLoading || preflightRef.current) return;
+    if (isImagesLoading || preflightRef.current || enhancing) return;
 
     if (!prompt.trim()) {
       toast.error('Type a prompt first.');
@@ -1114,8 +1151,28 @@ export default function ImagePromptForm({
                   }
                 }
               }}
+              readOnly={enhancing}
+              aria-busy={enhancing}
               className="hide-scrollbar max-h-[120px] min-h-[40px] w-full min-w-0 resize-none rounded-none border-none bg-transparent p-0 text-[15px] text-[var(--text-color--text-primary)] placeholder:text-[var(--base-color-brand--umber)]/70 focus:outline-none"
             />
+            <Hint
+              text={
+                canEnhance
+                  ? 'Rewrite this prompt so it is precise (GPT-6 Luna)'
+                  : 'Connect OpenAI on the APIs page to enhance prompts'
+              }
+            >
+              <button
+                type="button"
+                aria-label="Enhance prompt"
+                onClick={() => void handleEnhance()}
+                disabled={!canEnhance || enhancing || !prompt.trim()}
+                className="relative -top-[5.5px] inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] px-3 text-xs font-semibold text-[var(--base-color-brand--bean)] transition hover:border-[var(--base-color-brand--cinamon)] hover:text-[var(--base-color-brand--cinamon)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--base-color-brand--bean)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-[var(--base-color-brand--umber)]/50 disabled:hover:text-[var(--base-color-brand--bean)]"
+              >
+                <SparkleIcon className={`h-4 w-4 ${enhancing ? 'animate-pulse' : ''}`} />
+                {enhancing ? 'Enhancing…' : 'Enhance'}
+              </button>
+            </Hint>
           </div>
 
           {/* Two fixed rows of controls: what to make (row 1), then output settings
@@ -1302,7 +1359,7 @@ export default function ImagePromptForm({
             <Hint text="Create the images">
               <button
                 type="submit"
-                disabled={isImagesLoading || preflighting}
+                disabled={isImagesLoading || preflighting || enhancing}
                 className="inline-grid h-10 w-28 shrink-0 grid-flow-col items-center justify-center gap-2 rounded-full border-none bg-[var(--base-color-brand--cinamon)] px-2.5 text-sm font-semibold tracking-wide text-[var(--base-color-brand--shell)] shadow-[0_4px_0_0_var(--base-color-brand--dark-red)] transition-[background-color,box-shadow,transform] duration-150 hover:bg-[var(--base-color-brand--red)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--base-color-brand--bean)] active:translate-y-0.5 active:shadow-[0_2px_0_0_var(--base-color-brand--dark-red)] disabled:cursor-not-allowed disabled:bg-[var(--base-color-brand--umber)] disabled:text-[var(--base-color-brand--shell)]/70 disabled:shadow-[0_4px_0_0_var(--base-color-brand--bean)]"
                 style={{ fontFamily: 'var(--text-color--font-family--heading)' }}
               >

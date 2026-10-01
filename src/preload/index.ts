@@ -38,6 +38,14 @@ const api = {
       provider?: 'openai-api' | 'openai-oauth' | 'fal';
       modelVariant?: ImageModelId;
     }) => ipcRenderer.invoke('generate:image', data),
+    enhancePrompt: (data: {
+      prompt: string;
+      aspectRatio: string;
+      hasProductPhotos: boolean;
+      framingControlled: boolean;
+      imageModel: string;
+      provider?: 'openai-api' | 'openai-oauth' | 'fal';
+    }) => ipcRenderer.invoke('prompt:enhance', data),
   },
   files: {
     download: (url: string, filename: string) =>

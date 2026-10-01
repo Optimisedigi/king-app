@@ -2,6 +2,7 @@ import { shell } from 'electron';
 import log from 'electron-log/main';
 import { registerImageHandlers } from './images';
 import { registerGenerateHandlers } from './generate';
+import { registerEnhancePromptHandlers } from './enhancePrompt';
 import { registerFileHandlers } from './files';
 import { registerEntityHandlers } from './entities';
 import { registerAdReferenceHandlers } from './adReferences';
@@ -57,6 +58,7 @@ function isAllowedExternalUrl(url: string): boolean {
 export function registerIpcHandlers(): void {
   registerImageHandlers();
   registerGenerateHandlers();
+  registerEnhancePromptHandlers();
   registerFileHandlers();
   registerEntityHandlers();
   registerAdReferenceHandlers();
