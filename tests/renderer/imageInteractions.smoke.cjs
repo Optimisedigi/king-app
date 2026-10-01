@@ -871,6 +871,54 @@ async function run() {
     );
     console.log('PASS dropped photos are added and keep their original name');
 
+    // 2 angles: one paid 45° image plus a close-up cropped from it, no eye-level shot.
+    const twoAngles =
+      '[...document.querySelectorAll("form button[aria-pressed]")].find(b => b.textContent.trim() === "2 angles")';
+    await evaluate(`(() => {
+      window.generateRequests = [];
+      window.cropRequests = [];
+      window.api.generate.image = async (request) => {
+        window.generateRequests.push(request);
+        return {success: true, resultUrls: ['local-file:///entities/45.png']};
+      };
+      window.api.images.cropCloseUp = async (url) => {
+        window.cropRequests.push(url);
+        return {success: true, dataUrl: 'data:image/png;base64,Q0xPU0U='};
+      };
+    })()`);
+    await evaluate(`${twoAngles}.click()`);
+    await waitFor(`${twoAngles}.getAttribute('aria-pressed') === 'true'`);
+    const savesBeforeTwo = await evaluate('window.saveRequests.length');
+    await evaluate(
+      '[...document.querySelectorAll("form button")].find(b => b.textContent.trim() === "Generate").click()',
+    );
+    await waitFor(`window.saveRequests.length >= ${savesBeforeTwo + 2}`);
+    await evaluate('new Promise(r => setTimeout(r, 300))');
+    const twoAngleRun = await evaluate(`({
+      prompts: window.generateRequests.map(r => r.prompt),
+      crops: window.cropRequests,
+      saved: window.saveRequests.slice(${savesBeforeTwo}).length,
+    })`);
+    assert.equal(
+      twoAngleRun.prompts.length,
+      1,
+      `2 angles makes one paid image: ${JSON.stringify(twoAngleRun)}`,
+    );
+    assert.ok(
+      twoAngleRun.prompts[0].includes('45-degree elevated angle') &&
+        !twoAngleRun.prompts[0].includes('Camera at eye level'),
+      `The one paid image is the 45° shot, not eye level: ${twoAngleRun.prompts[0]}`,
+    );
+    assert.deepEqual(
+      twoAngleRun.crops,
+      ['local-file:///entities/45.png'],
+      'The close-up is cropped from that 45° image',
+    );
+    assert.equal(twoAngleRun.saved, 2, 'The 45° image and its close-up are both saved');
+    await evaluate(`${twoAngles}.click()`);
+    await waitFor(`${twoAngles}.getAttribute('aria-pressed') === 'false'`);
+    console.log('PASS 2 angles makes the 45° shot and its cropped close-up only');
+
     const clearReferences = async () => {
       await evaluate('removeAllReferences()');
       await waitFor('referenceCount() === 0');
@@ -1142,7 +1190,13 @@ async function run() {
     assert.deepEqual(
       layout.row1,
       // No image model is connected in this harness, so its menu is hidden.
-      ['Saved prompts', 'All products — 3 products, one image each', 'Refresh choices', '3 angles'],
+      [
+        'Saved prompts',
+        'All products — 3 products, one image each',
+        'Refresh choices',
+        '2 angles',
+        '3 angles',
+      ],
       'Row 1: what to make',
     );
     assert.deepEqual(
@@ -1184,6 +1238,7 @@ async function run() {
       [button('Saved prompts'), 'Save or reuse prompt wording'],
       ['document.querySelector("form button[aria-haspopup=listbox]")', 'Products to photograph'],
       [button('Refresh choices'), 'Reload products and folders'],
+      [button('2 angles'), '45° and close-up'],
       [button('3 angles'), 'Eye level, 45° and close-up'],
       [button('More images'), 'Images per product'],
       [button('High'), 'Image quality'],
@@ -1210,18 +1265,18 @@ async function run() {
     await evaluate(`${button('Refresh choices')}.focus()`);
     window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' });
     window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' });
-    await waitFor(`document.activeElement === ${button('3 angles')}`);
+    await waitFor(`document.activeElement === ${button('2 angles')}`);
     await waitFor('document.querySelector("[data-hint]")');
     assert.equal(
       await evaluate('document.querySelector("[data-hint]").textContent.trim()'),
-      'Eye level, 45° and close-up',
+      '45° and close-up',
       'Tabbing to a control shows its hint',
     );
     // Escape hides it again without moving focus.
     window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
     await waitFor('!document.querySelector("[data-hint]")');
     assert.equal(
-      await evaluate(`document.activeElement === ${button('3 angles')}`),
+      await evaluate(`document.activeElement === ${button('2 angles')}`),
       true,
       'Escape hides the hint and keeps focus',
     );
