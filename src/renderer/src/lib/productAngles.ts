@@ -52,8 +52,10 @@ export const PRODUCT_ANGLES: ProductAngle[] = [
 export const CLOSE_UP_SOURCE_ANGLE_ID = 'elevated-45';
 export const CLOSE_UP_LABEL = 'Close-up (cropped)';
 
-/** Total images an angle set produces: one per generated angle, plus the crop. */
-export const ANGLE_SET_SIZE = PRODUCT_ANGLES.length + 1;
+/** Images an angle set produces: one per generated angle, plus the crop when included. */
+export function angleSetSize(includeCloseUp: boolean): number {
+  return PRODUCT_ANGLES.length + (includeCloseUp ? 1 : 0);
+}
 
 /**
  * Default guidance for an angle set without a composition template.

@@ -1,9 +1,11 @@
 import { dialog, BrowserWindow, app } from 'electron';
 import { writeFileSync, readFileSync, readdirSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { join } from 'path';
 import log from 'electron-log/main';
 import { resolveLocalFileUrl } from '../services/paths';
 import { safeFileStem, extensionFor, uniqueFilename } from '../services/exportNames';
+import { openZipWriter } from '../services/zipWriter';
 import { secureHandle } from './validateSender';
 
 /** One image in a bulk export. */
@@ -112,5 +114,79 @@ export function registerFileHandlers(): void {
     }
 
     return { success: exported > 0, directory, exported, failed };
+  });
+
+  /**
+   * Save many images into one zip file the user names once.
+   *
+   * Same rules as the folder export: only saved `local-file://` images, names
+   * sanitised and de-duplicated inside the zip. No zip is created if none of
+   * the images could be read.
+   */
+  secureHandle('files:exportZip', async (_event, items: ExportItem[]) => {
+    const win = BrowserWindow.getFocusedWindow();
+    if (!win) return { success: false as const, exported: 0, failed: 0 };
+    if (!Array.isArray(items) || items.length === 0) {
+      return { success: false as const, exported: 0, failed: 0 };
+    }
+    if (items.length > MAX_EXPORT_ITEMS) {
+      throw new Error(`You can export up to ${MAX_EXPORT_ITEMS} images at once.`);
+    }
+
+    const now = new Date();
+    const day = [now.getFullYear(), now.getMonth() + 1, now.getDate()]
+      .map((part) => String(part).padStart(2, '0'))
+      .join('-');
+    const { filePath } = await dialog.showSaveDialog(win, {
+      title: 'Save the selected images as a zip',
+      defaultPath: join(app.getPath('downloads'), `OptiMate images ${day}.zip`),
+      filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+    });
+    if (!filePath) return { success: false as const, cancelled: true, exported: 0, failed: 0 };
+
+    const started = Date.now();
+    const zip = await openZipWriter(filePath, now);
+    const used = new Set<string>();
+    let exported = 0;
+    let failed = 0;
+    try {
+      for (const item of items) {
+        const localPath =
+          item && typeof item.url === 'string' ? resolveLocalFileUrl(item.url) : null;
+        if (!localPath) {
+          failed++;
+          continue;
+        }
+        let data: Buffer;
+        try {
+          data = await readFile(localPath);
+        } catch (error) {
+          log.error('[files:exportZip] failed to read an image', {
+            message: error instanceof Error ? error.message : String(error),
+          });
+          failed++;
+          continue;
+        }
+        const stem = safeFileStem(typeof item.name === 'string' ? item.name : '');
+        await zip.add(uniqueFilename(stem, extensionFor(item.filename), used), data);
+        exported++;
+      }
+      if (exported === 0) {
+        await zip.abort();
+        return { success: false as const, exported, failed };
+      }
+      await zip.finish();
+    } catch (error) {
+      await zip.abort();
+      log.error('[files:exportZip] failed to write the zip', {
+        exported,
+        failed,
+        elapsedMs: Date.now() - started,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+    log.info('[files:exportZip] saved zip', { exported, failed, elapsedMs: Date.now() - started });
+    return { success: true as const, filePath, exported, failed };
   });
 }

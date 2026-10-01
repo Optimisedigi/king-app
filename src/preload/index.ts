@@ -44,6 +44,8 @@ const api = {
       ipcRenderer.invoke('files:download', url, filename),
     exportBatch: (items: { url: string; name: string; filename?: string }[]) =>
       ipcRenderer.invoke('files:exportBatch', items),
+    exportZip: (items: { url: string; name: string; filename?: string }[]) =>
+      ipcRenderer.invoke('files:exportZip', items),
   },
   apiKeys: {
     list: () => ipcRenderer.invoke('apiKeys:list'),

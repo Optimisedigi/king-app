@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState, type ReactElement } from 'react';
 import { useCompositionStore } from '@/stores/compositionStore';
 import { ChevronDownIcon } from '@/components/icons';
 import { Hint } from '@/components/ui/Hint';
+import { angleSetSize } from '@/lib/productAngles';
 import {
   SHOOT_ANGLES,
   type ShootAngle,
@@ -14,7 +15,14 @@ const Editor = lazy(async () => ({
 const button =
   'min-h-10 rounded-full border border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] px-3 text-[11px] transition hover:border-[var(--base-color-brand--bean)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--base-color-brand--bean)]';
 const labels = { 'eye-level': 'Eye level', 'elevated-45': '45° above' };
-export function CompositionTemplatePicker({ angleSet }: { angleSet: boolean }): ReactElement {
+export function CompositionTemplatePicker({
+  angleSet,
+  includeCloseUp = true,
+}: {
+  angleSet: boolean;
+  /** Whether the active angle set also crops a close-up from the 45° shot. */
+  includeCloseUp?: boolean;
+}): ReactElement {
   const state = useCompositionStore();
   const [editing, setEditing] = useState<{
     template?: ShootTemplate;
@@ -52,7 +60,7 @@ export function CompositionTemplatePicker({ angleSet }: { angleSet: boolean }): 
         // Expands into a panel, so it takes the full width of the row.
         <details className="order-last w-full min-w-0 basis-full">
           <summary className="min-h-10 cursor-pointer rounded-lg py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--base-color-brand--bean)]">
-            Compositions for 3 angles
+            Compositions for {angleSetSize(includeCloseUp)} angles
             <span className="ml-2 text-xs font-normal">
               {
                 SHOOT_ANGLES.filter((angle) => {
@@ -146,8 +154,8 @@ export function CompositionTemplatePicker({ angleSet }: { angleSet: boolean }): 
               );
             })}
             <p className="text-xs">
-              Close-up: cropped from the 45° image. Assign both compositions, or leave both None for
-              prompt-only generation.
+              {includeCloseUp ? 'Close-up: cropped from the 45° image. ' : ''}Assign both
+              compositions, or leave both None for prompt-only generation.
             </p>
           </fieldset>
         </details>

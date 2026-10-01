@@ -234,6 +234,14 @@ export interface ElectronAPI {
       failed: number;
       cancelled?: boolean;
     }>;
+    /** Save many saved images into one zip file the user names in a single dialog. */
+    exportZip: (items: { url: string; name: string; filename?: string }[]) => Promise<{
+      success: boolean;
+      filePath?: string;
+      exported: number;
+      failed: number;
+      cancelled?: boolean;
+    }>;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

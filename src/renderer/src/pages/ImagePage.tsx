@@ -155,46 +155,53 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
   }, [selectedCount]);
 
   /**
-   * Save every selected image into one folder, picked once. Each file is named
-   * after the original photo it was made from; older images without a stored
-   * name fall back to their prompt.
+   * Save every selected image into one folder, or into one zip file, picked
+   * once. Each file is named after the original photo it was made from; older
+   * images without a stored name fall back to their prompt.
    */
-  const handleExportSelected = useCallback(async () => {
-    if (selectedCount === 0 || isExporting) return;
+  const handleExportSelected = useCallback(
+    async (as: 'folder' | 'zip') => {
+      if (selectedCount === 0 || isExporting) return;
 
-    const items = generatedImages
-      .filter((image) => selectedImages.has(image.id))
-      .map((image) => ({
-        url: image.url,
-        // Keep the original photo's name; older images fall back to the prompt.
-        name: image.sourceName ?? image.prompt,
-        // The stored URL ends in the saved filename, which carries the
-        // extension the export should keep.
-        filename: image.url.split('/').pop() ?? undefined,
-      }));
-    if (!items.length) return;
+      const items = generatedImages
+        .filter((image) => selectedImages.has(image.id))
+        .map((image) => ({
+          url: image.url,
+          // Keep the original photo's name; older images fall back to the prompt.
+          name: image.sourceName ?? image.prompt,
+          // The stored URL ends in the saved filename, which carries the
+          // extension the export should keep.
+          filename: image.url.split('/').pop() ?? undefined,
+        }));
+      if (!items.length) return;
 
-    setIsExporting(true);
-    try {
-      const result = await window.api.files.exportBatch(items);
-      if (result.cancelled) return;
+      setIsExporting(true);
+      try {
+        const result =
+          as === 'zip'
+            ? await window.api.files.exportZip(items)
+            : await window.api.files.exportBatch(items);
+        if (result.cancelled) return;
 
-      if (result.exported > 0) {
-        toast.success(
-          result.failed > 0
-            ? `Exported ${result.exported} images. ${result.failed} couldn't be saved.`
-            : `Exported ${result.exported} image${result.exported === 1 ? '' : 's'}.`,
-        );
-        clearSelection();
-      } else {
-        toast.error("Couldn't export those images.");
+        if (result.exported > 0) {
+          const where = as === 'zip' ? ' to a zip' : '';
+          toast.success(
+            result.failed > 0
+              ? `Exported ${result.exported} images${where}. ${result.failed} couldn't be saved.`
+              : `Exported ${result.exported} image${result.exported === 1 ? '' : 's'}${where}.`,
+          );
+          clearSelection();
+        } else {
+          toast.error("Couldn't export those images.");
+        }
+      } catch (err) {
+        toast.error(cleanIpcError(err, "Couldn't export those images."));
+      } finally {
+        setIsExporting(false);
       }
-    } catch (err) {
-      toast.error(cleanIpcError(err, "Couldn't export those images."));
-    } finally {
-      setIsExporting(false);
-    }
-  }, [selectedCount, isExporting, generatedImages, selectedImages, clearSelection]);
+    },
+    [selectedCount, isExporting, generatedImages, selectedImages, clearSelection],
+  );
 
   const confirmBatchDelete = useCallback(async () => {
     const ids = Array.from(selectedImages);
@@ -263,6 +270,8 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     provider?: 'openai-api' | 'openai-oauth' | 'fal';
     modelVariant?: ImageModelId;
     angleShots?: AngleShot[];
+    /** Whether an angle set also crops a close-up from the 45° shot. Defaults to true. */
+    includeCloseUp?: boolean;
     /** One entry per product in a batch run; omitted for a single run. */
     targets?: GenerationTarget[];
     composition?: ShootTemplate;
@@ -307,15 +316,16 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     }
 
     // Each product in an angle-set run gets its own close-up, cropped once the
-    // shot it comes from has been generated.
-    const cropJobs = isAngleSet
-      ? targets.map((target) => ({
-          id: `crop-${Date.now()}-${target.key}`,
-          targetKey: target.key,
-          targetLabel: target.label,
-          sourceName: target.sourceName,
-        }))
-      : [];
+    // shot it comes from has been generated, unless the run asked for two angles only.
+    const cropJobs =
+      isAngleSet && data.includeCloseUp !== false
+        ? targets.map((target) => ({
+            id: `crop-${Date.now()}-${target.key}`,
+            targetKey: target.key,
+            targetLabel: target.label,
+            sourceName: target.sourceName,
+          }))
+        : [];
     for (const crop of cropJobs) {
       addImageGeneration(crop.id, labelledPrompt(CLOSE_UP_LABEL, crop.targetLabel));
     }
@@ -458,13 +468,23 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
             )}
             <button
               type="button"
-              onClick={handleExportSelected}
+              onClick={() => void handleExportSelected('folder')}
               disabled={isExporting}
               className="btn-cinamon btn-sm"
               title="Save the selected images into one folder"
             >
               <DownloadIcon />
               {isExporting ? 'Exporting…' : 'Export'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleExportSelected('zip')}
+              disabled={isExporting}
+              className="btn-cinamon btn-sm"
+              title="Download the selected images as one zip file"
+            >
+              <DownloadIcon />
+              Zip
             </button>
             <button
               type="button"

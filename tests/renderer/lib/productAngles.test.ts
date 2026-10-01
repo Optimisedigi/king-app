@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   PRODUCT_ANGLES,
   ELEVATED_45_CAMERA,
-  ANGLE_SET_SIZE,
+  angleSetSize,
   CLOSE_UP_SOURCE_ANGLE_ID,
   CONSISTENCY_CLAUSE,
   buildAnglePrompt,
@@ -20,9 +20,16 @@ describe('product angles', () => {
     }
   });
 
-  it('counts the cropped close-up on top of the generated angles', () => {
-    expect(ANGLE_SET_SIZE).toBe(PRODUCT_ANGLES.length + 1);
-  });
+  it.each([
+    [true, 3],
+    [false, 2],
+  ])(
+    'counts the cropped close-up (%s) on top of the 2 generated angles',
+    (includeCloseUp, size) => {
+      expect(PRODUCT_ANGLES).toHaveLength(2);
+      expect(angleSetSize(includeCloseUp)).toBe(size);
+    },
+  );
 
   it('crops the close-up from an angle that is actually generated', () => {
     expect(PRODUCT_ANGLES.some((angle) => angle.id === CLOSE_UP_SOURCE_ANGLE_ID)).toBe(true);

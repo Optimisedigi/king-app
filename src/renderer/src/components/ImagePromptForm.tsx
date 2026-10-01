@@ -4,12 +4,7 @@ import SelectDropdown from '@/components/ui/SelectDropdown';
 import { ProductReferencePicker } from '@/components/image/ProductReferencePicker';
 import { collectProductReferences } from '@/lib/productReferences';
 import { isGenericClipboardName, sourceNameForReferences } from '@/lib/sourceNames';
-import {
-  PRODUCT_ANGLES,
-  ANGLE_SET_SIZE,
-  buildAngleShots,
-  type AngleShot,
-} from '@/lib/productAngles';
+import { PRODUCT_ANGLES, angleSetSize, buildAngleShots, type AngleShot } from '@/lib/productAngles';
 import {
   PlusIcon,
   MinusIcon,
@@ -101,6 +96,8 @@ interface ImagePromptFormProps {
      * prompts take precedence over `prompt`.
      */
     angleShots?: AngleShot[];
+    /** Whether an angle set also crops a close-up from the 45° shot. Defaults to true. */
+    includeCloseUp?: boolean;
     /**
      * One entry per product when running the same prompt across a batch.
      * Each carries that product's own reference photos.
@@ -147,7 +144,11 @@ export default function ImagePromptForm({
   const [manualGroups, setManualGroups] = useState<ManualProductGroup[]>([]);
   const selectedReferenceUrls = useRef<Set<string>>(new Set());
   const [imageCount, setImageCount] = useState(1);
-  const [angleSet, setAngleSet] = useState(false);
+  // 'two' makes eye level and 45° only; 'three' also crops a close-up from the 45° shot.
+  const [angleChoice, setAngleChoice] = useState<'off' | 'two' | 'three'>('off');
+  const angleSet = angleChoice !== 'off';
+  const includeCloseUp = angleChoice === 'three';
+  const angleSetCount = angleSetSize(includeCloseUp);
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const compositionState = useCompositionStore();
   const composition = compositionState.templates.find(
@@ -879,12 +880,12 @@ export default function ImagePromptForm({
     // A batch multiplies cost by the number of products, so confirm before
     // firing off a large run the user can't easily cancel.
     if (isBatch) {
-      const perProduct = angleSet ? ANGLE_SET_SIZE : imageCount;
+      const perProduct = angleSet ? angleSetCount : imageCount;
       const total = batchTargets.length * perProduct;
       if (total > BATCH_CONFIRM_THRESHOLD || hasPairedTargets) {
         const confirmed = window.confirm(
           angleSet
-            ? `${batchScope}: This will make ${total} images for ${batchTargets.length} products: ${batchTargets.length * PRODUCT_ANGLES.length} paid generations plus ${batchTargets.length} local close-up crops. Continue?`
+            ? `${batchScope}: This will make ${total} images for ${batchTargets.length} products: ${batchTargets.length * PRODUCT_ANGLES.length} paid generations${includeCloseUp ? ` plus ${batchTargets.length} local close-up crops` : ''}. Continue?`
             : `${batchScope}: This will generate ${total} images (${perProduct} for each of ${batchTargets.length} products) and bill your provider for every one. Continue?`,
         );
         if (!confirmed) return;
@@ -911,6 +912,7 @@ export default function ImagePromptForm({
         provider,
         modelVariant,
         angleShots: buildAngleShots(resolvedPrompt, !!compositions),
+        includeCloseUp,
         ...(isBatch ? { targets: batchTargets } : {}),
         ...(!isBatch && singleSourceName ? { sourceName: singleSourceName } : {}),
       });
@@ -1182,21 +1184,29 @@ export default function ImagePromptForm({
               </span>
             )}
 
-            {/* Angle set — one shot per camera angle, all from the same photo. */}
-            <Hint text="Eye level, 45° and close-up">
-              <button
-                type="button"
-                onClick={() => setAngleSet((prev) => !prev)}
-                aria-pressed={angleSet}
-                className={`flex h-10 shrink-0 items-center rounded-full border px-3 text-[11px] font-semibold whitespace-nowrap transition-colors ${
-                  angleSet
-                    ? 'border-[var(--base-color-brand--bean)] bg-[var(--base-color-brand--bean)] text-[var(--base-color-brand--shell)]'
-                    : 'border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] text-[var(--base-color-brand--bean)] hover:text-[var(--base-color-brand--cinamon)]'
-                }`}
-              >
-                {ANGLE_SET_SIZE} angles
-              </button>
-            </Hint>
+            {/* Angle set — one shot per camera angle, all from the same photo.
+                Clicking the active choice again turns the angle set off. */}
+            {(
+              [
+                ['two', 'Eye level and 45°'],
+                ['three', 'Eye level, 45° and close-up'],
+              ] as const
+            ).map(([choice, hint]) => (
+              <Hint key={choice} text={hint}>
+                <button
+                  type="button"
+                  onClick={() => setAngleChoice((prev) => (prev === choice ? 'off' : choice))}
+                  aria-pressed={angleChoice === choice}
+                  className={`flex h-10 shrink-0 items-center rounded-full border px-3 text-[11px] font-semibold whitespace-nowrap transition-colors ${
+                    angleChoice === choice
+                      ? 'border-[var(--base-color-brand--bean)] bg-[var(--base-color-brand--bean)] text-[var(--base-color-brand--shell)]'
+                      : 'border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] text-[var(--base-color-brand--bean)] hover:text-[var(--base-color-brand--cinamon)]'
+                  }`}
+                >
+                  {angleSetSize(choice === 'three')} angles
+                </button>
+              </Hint>
+            ))}
           </div>
           {/* Reserve space for Generate beside the output settings row. Generate
               lines up with the controls, not with any message wrapping below them. */}
@@ -1221,7 +1231,7 @@ export default function ImagePromptForm({
                     <MinusIcon />
                   </button>
                   <span className="w-8 text-center text-[11px] font-semibold text-[var(--base-color-brand--bean)]">
-                    {angleSet ? ANGLE_SET_SIZE : imageCount}
+                    {angleSet ? angleSetCount : imageCount}
                     <span className="text-[var(--base-color-brand--umber)]">/{maxImages}</span>
                   </span>
                   <button
@@ -1277,7 +1287,7 @@ export default function ImagePromptForm({
                 />
               </Hint>
 
-              <CompositionTemplatePicker angleSet={angleSet} />
+              <CompositionTemplatePicker angleSet={angleSet} includeCloseUp={includeCloseUp} />
             </div>
             {/* Generate stays alongside the controls and matches their 40px height. */}
             <Hint text="Create the images">
