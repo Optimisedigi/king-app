@@ -1,6 +1,7 @@
 import type { AngleShot } from './productAngles';
 import {
   preflightCompositionAssignments,
+  shootAnglesForShots,
   type CompositionAssignments,
 } from './compositionAssignments';
 import { buildCompositionRequest, preflightComposition } from './compositionPrompt';
@@ -76,12 +77,20 @@ export function buildGenerationJobs(options: {
     throw new Error('Use either composition or compositions, not both.');
   const compositions = options.compositions ? structuredClone(options.compositions) : undefined;
   if (compositions) {
+    // Each generated angle needs its own composition, and none may target a shot the set skips.
+    const setAngles = angleShots?.length ? shootAnglesForShots(angleShots) : [];
     if (
-      angleShots?.length !== SHOOT_ANGLES.length ||
-      !SHOOT_ANGLES.every((angle) => angleShots.some((shot) => shot.angleId === angle))
+      !setAngles.length ||
+      new Set(setAngles).size !== setAngles.length ||
+      SHOOT_ANGLES.some((angle) => compositions[angle] && !setAngles.includes(angle))
     )
-      throw new Error('Per-angle compositions require an eye-level and elevated-45 angle set.');
-    preflightCompositionAssignments({ assignments: compositions, targets, basePrompt });
+      throw new Error('Per-angle compositions must match the angles in the angle set.');
+    preflightCompositionAssignments({
+      assignments: compositions,
+      targets,
+      basePrompt,
+      angles: setAngles,
+    });
   }
   const composition = options.composition ? structuredClone(options.composition) : undefined;
   const singleAngle = options.singleShotAngle ?? 'eye-level';

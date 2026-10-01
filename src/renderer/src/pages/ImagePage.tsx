@@ -23,7 +23,11 @@ import {
 } from '@/lib/generationJobs';
 import type { ImageModelId } from '@/types/electron';
 import type { ShootAngle, ShootTemplate } from '../../../shared/shootTemplates';
-import { templatesForPreflight, type CompositionAssignments } from '@/lib/compositionAssignments';
+import {
+  shootAnglesForShots,
+  templatesForPreflight,
+  type CompositionAssignments,
+} from '@/lib/compositionAssignments';
 
 /**
  * Which model name to record on the saved image, matching what actually
@@ -270,8 +274,6 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     provider?: 'openai-api' | 'openai-oauth' | 'fal';
     modelVariant?: ImageModelId;
     angleShots?: AngleShot[];
-    /** Whether an angle set also crops a close-up from the 45° shot. Defaults to true. */
-    includeCloseUp?: boolean;
     /** One entry per product in a batch run; omitted for a single run. */
     targets?: GenerationTarget[];
     composition?: ShootTemplate;
@@ -301,7 +303,10 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
       });
       if (snapshot) await window.api.shootTemplates.preflight(snapshot);
       if (compositions) {
-        for (const template of templatesForPreflight(compositions)) {
+        for (const template of templatesForPreflight(
+          compositions,
+          shootAnglesForShots(angleShots ?? []),
+        )) {
           await window.api.shootTemplates.preflight(template);
         }
       }
@@ -316,16 +321,15 @@ export default function ImagePage({ prefillPrompt, onPromptConsumed }: ImagePage
     }
 
     // Each product in an angle-set run gets its own close-up, cropped once the
-    // shot it comes from has been generated, unless the run asked for two angles only.
-    const cropJobs =
-      isAngleSet && data.includeCloseUp !== false
-        ? targets.map((target) => ({
-            id: `crop-${Date.now()}-${target.key}`,
-            targetKey: target.key,
-            targetLabel: target.label,
-            sourceName: target.sourceName,
-          }))
-        : [];
+    // shot it comes from has been generated.
+    const cropJobs = isAngleSet
+      ? targets.map((target) => ({
+          id: `crop-${Date.now()}-${target.key}`,
+          targetKey: target.key,
+          targetLabel: target.label,
+          sourceName: target.sourceName,
+        }))
+      : [];
     for (const crop of cropJobs) {
       addImageGeneration(crop.id, labelledPrompt(CLOSE_UP_LABEL, crop.targetLabel));
     }

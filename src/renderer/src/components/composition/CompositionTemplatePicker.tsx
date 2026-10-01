@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect, useState, type ReactElement } from 'react';
 import { useCompositionStore } from '@/stores/compositionStore';
 import { ChevronDownIcon } from '@/components/icons';
 import { Hint } from '@/components/ui/Hint';
-import { angleSetSize } from '@/lib/productAngles';
 import {
   SHOOT_ANGLES,
   type ShootAngle,
@@ -17,11 +16,14 @@ const button =
 const labels = { 'eye-level': 'Eye level', 'elevated-45': '45° above' };
 export function CompositionTemplatePicker({
   angleSet,
-  includeCloseUp = true,
+  angles = SHOOT_ANGLES,
+  imageCount = 3,
 }: {
   angleSet: boolean;
-  /** Whether the active angle set also crops a close-up from the 45° shot. */
-  includeCloseUp?: boolean;
+  /** The shots the active angle set generates; only these get a composition. */
+  angles?: readonly ShootAngle[];
+  /** Images the set produces, including the cropped close-up. */
+  imageCount?: number;
 }): ReactElement {
   const state = useCompositionStore();
   const [editing, setEditing] = useState<{
@@ -60,10 +62,10 @@ export function CompositionTemplatePicker({
         // Expands into a panel, so it takes the full width of the row.
         <details className="order-last w-full min-w-0 basis-full">
           <summary className="min-h-10 cursor-pointer rounded-lg py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--base-color-brand--bean)]">
-            Compositions for {angleSetSize(includeCloseUp)} angles
+            Compositions for {imageCount} angles
             <span className="ml-2 text-xs font-normal">
               {
-                SHOOT_ANGLES.filter((angle) => {
+                angles.filter((angle) => {
                   const selection = state.angleSelections[angle];
                   return (
                     selection &&
@@ -74,12 +76,12 @@ export function CompositionTemplatePicker({
                   );
                 }).length
               }{' '}
-              of 2 assigned
+              of {angles.length} assigned
             </span>
           </summary>
           <fieldset className="min-w-0 space-y-2 pt-2">
             <legend className="sr-only">Angle compositions</legend>
-            {SHOOT_ANGLES.map((angle) => {
+            {angles.map((angle) => {
               const selection = state.angleSelections[angle];
               const value = selection ? `${selection.templateId}:${selection.referenceAngle}` : '';
               const reference = references.find((entry) => entry.value === value);
@@ -154,8 +156,10 @@ export function CompositionTemplatePicker({
               );
             })}
             <p className="text-xs">
-              {includeCloseUp ? 'Close-up: cropped from the 45° image. ' : ''}Assign both
-              compositions, or leave both None for prompt-only generation.
+              Close-up: cropped from the 45° image.{' '}
+              {angles.length > 1
+                ? 'Assign both compositions, or leave both None for prompt-only generation.'
+                : 'Assign a composition, or leave it None for prompt-only generation.'}
             </p>
           </fieldset>
         </details>

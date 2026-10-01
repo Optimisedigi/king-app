@@ -35,14 +35,18 @@ function requireAssignment(
   return assignment;
 }
 
-/** Resolve by id and explicit source slot only; never infer from template names. */
+/**
+ * Resolve by id and explicit source slot only; never infer from template names.
+ * `angles` are the shots the set generates; selections for other angles are ignored.
+ */
 export function resolveCompositionAssignments(
   templates: ShootTemplate[],
   selections: CompositionSelections,
+  angles: readonly ShootAngle[] = SHOOT_ANGLES,
 ): CompositionAssignments | undefined {
-  if (SHOOT_ANGLES.every((angle) => !selections[angle])) return undefined;
+  if (angles.every((angle) => !selections[angle])) return undefined;
   const assignments: CompositionAssignments = {};
-  for (const angle of SHOOT_ANGLES) {
+  for (const angle of angles) {
     const selection = selections[angle];
     if (!selection) throw new Error(`Select a composition template and reference for ${angle}.`);
     const template = templates.find((value) => value.id === selection.templateId);
@@ -59,8 +63,11 @@ export function preflightCompositionAssignments(options: {
   assignments: CompositionAssignments;
   targets: { label: string | null; referenceImages: string[] }[];
   basePrompt: string;
+  /** The shots the set generates; each needs an assignment. */
+  angles?: readonly ShootAngle[];
 }): void {
-  for (const angle of SHOOT_ANGLES) requireAssignment(options.assignments, angle);
+  const angles = options.angles ?? SHOOT_ANGLES;
+  for (const angle of angles) requireAssignment(options.assignments, angle);
   const invalid = options.targets.filter(
     (target) => target.referenceImages.length === 0 || target.referenceImages.length > 7,
   );
@@ -68,7 +75,7 @@ export function preflightCompositionAssignments(options: {
     throw new Error(
       `Composition needs 1–7 product photos for: ${invalid.map((target) => target.label ?? 'Current product').join(', ')}. No images were queued.`,
     );
-  for (const angle of SHOOT_ANGLES) {
+  for (const angle of angles) {
     const { template, referenceAngle } = requireAssignment(options.assignments, angle);
     for (const target of options.targets)
       buildCompositionRequest(
@@ -81,9 +88,21 @@ export function preflightCompositionAssignments(options: {
   }
 }
 
+/** The composition angles an angle set generates, matched by id. Rejects unknown angles. */
+export function shootAnglesForShots(shots: readonly { angleId: string }[]): ShootAngle[] {
+  return shots.map((shot) => {
+    const angle = SHOOT_ANGLES.find((value) => value === shot.angleId);
+    if (!angle) throw new Error('Unsupported composition angle.');
+    return angle;
+  });
+}
+
 /** Disk preflight needs only the explicitly selected source slots, not unused assets. */
-export function templatesForPreflight(assignments: CompositionAssignments): ShootTemplate[] {
-  return SHOOT_ANGLES.map((angle) => {
+export function templatesForPreflight(
+  assignments: CompositionAssignments,
+  angles: readonly ShootAngle[] = SHOOT_ANGLES,
+): ShootTemplate[] {
+  return angles.map((angle) => {
     const { template, referenceAngle } = requireAssignment(assignments, angle);
     return structuredClone({
       ...template,

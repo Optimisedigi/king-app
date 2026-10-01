@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   PRODUCT_ANGLES,
   ELEVATED_45_CAMERA,
+  angleSetAngles,
   angleSetSize,
   CLOSE_UP_SOURCE_ANGLE_ID,
   CONSISTENCY_CLAUSE,
@@ -21,15 +22,21 @@ describe('product angles', () => {
   });
 
   it.each([
-    [true, 3],
-    [false, 2],
-  ])(
-    'counts the cropped close-up (%s) on top of the 2 generated angles',
-    (includeCloseUp, size) => {
-      expect(PRODUCT_ANGLES).toHaveLength(2);
-      expect(angleSetSize(includeCloseUp)).toBe(size);
-    },
-  );
+    ['three', ['eye-level', 'elevated-45'], 3],
+    ['two', ['elevated-45'], 2],
+  ] as const)('the %s-angle set generates %j plus the cropped close-up', (choice, ids, size) => {
+    const angles = angleSetAngles(choice);
+    expect(angles.map((angle) => angle.id)).toEqual(ids);
+    // Every set keeps the 45° shot, because the close-up is cropped from it.
+    expect(angles.some((angle) => angle.id === CLOSE_UP_SOURCE_ANGLE_ID)).toBe(true);
+    expect(angleSetSize(choice)).toBe(size);
+  });
+
+  it('builds shots for only the chosen angles', () => {
+    const shots = buildAngleShots('Cake', false, angleSetAngles('two'));
+    expect(shots.map((shot) => shot.angleId)).toEqual(['elevated-45']);
+    expect(shots[0]?.prompt).toContain(ELEVATED_45_CAMERA);
+  });
 
   it('crops the close-up from an angle that is actually generated', () => {
     expect(PRODUCT_ANGLES.some((angle) => angle.id === CLOSE_UP_SOURCE_ANGLE_ID)).toBe(true);

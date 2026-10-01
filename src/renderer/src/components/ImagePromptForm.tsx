@@ -4,7 +4,13 @@ import SelectDropdown from '@/components/ui/SelectDropdown';
 import { ProductReferencePicker } from '@/components/image/ProductReferencePicker';
 import { collectProductReferences } from '@/lib/productReferences';
 import { isGenericClipboardName, sourceNameForReferences } from '@/lib/sourceNames';
-import { PRODUCT_ANGLES, angleSetSize, buildAngleShots, type AngleShot } from '@/lib/productAngles';
+import {
+  angleSetAngles,
+  angleSetSize,
+  buildAngleShots,
+  type AngleSetChoice,
+  type AngleShot,
+} from '@/lib/productAngles';
 import {
   PlusIcon,
   MinusIcon,
@@ -49,6 +55,7 @@ import { preflightComposition } from '@/lib/compositionPrompt';
 import {
   resolveCompositionAssignments,
   preflightCompositionAssignments,
+  shootAnglesForShots,
   templatesForPreflight,
   type CompositionAssignments,
 } from '@/lib/compositionAssignments';
@@ -96,8 +103,6 @@ interface ImagePromptFormProps {
      * prompts take precedence over `prompt`.
      */
     angleShots?: AngleShot[];
-    /** Whether an angle set also crops a close-up from the 45° shot. Defaults to true. */
-    includeCloseUp?: boolean;
     /**
      * One entry per product when running the same prompt across a batch.
      * Each carries that product's own reference photos.
@@ -144,21 +149,20 @@ export default function ImagePromptForm({
   const [manualGroups, setManualGroups] = useState<ManualProductGroup[]>([]);
   const selectedReferenceUrls = useRef<Set<string>>(new Set());
   const [imageCount, setImageCount] = useState(1);
-  // 'two' makes eye level and 45° only; 'three' also crops a close-up from the 45° shot.
-  const [angleChoice, setAngleChoice] = useState<'off' | 'two' | 'three'>('off');
+  // 'two' is the 45° shot and its cropped close-up; 'three' adds the eye-level shot.
+  const [angleChoice, setAngleChoice] = useState<AngleSetChoice | 'off'>('off');
   const angleSet = angleChoice !== 'off';
-  const includeCloseUp = angleChoice === 'three';
-  const angleSetCount = angleSetSize(includeCloseUp);
+  // The angles this set generates; the close-up is cropped, not generated.
+  const setAngles = angleSetAngles(angleChoice === 'off' ? 'three' : angleChoice);
+  const setShootAngles = shootAnglesForShots(setAngles.map((angle) => ({ angleId: angle.id })));
+  const angleSetCount = setAngles.length + 1;
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const compositionState = useCompositionStore();
   const composition = compositionState.templates.find(
     (template) => !angleSet && template.id === compositionState.selectedId,
   );
   const usesComposition = angleSet
-    ? !!(
-        compositionState.angleSelections['eye-level'] ||
-        compositionState.angleSelections['elevated-45']
-      )
+    ? setShootAngles.some((angle) => !!compositionState.angleSelections[angle])
     : !!compositionState.selectedId;
   const effectiveAspect = composition?.aspectRatio ?? aspectRatio;
   const [preflighting, setPreflighting] = useState(false);
@@ -717,7 +721,7 @@ export default function ImagePromptForm({
     if (
       selectedProductEntries.length > 1 &&
       (angleSet
-        ? buildAngleShots(resolvedPrompt, usesComposition).map((shot) => shot.prompt)
+        ? buildAngleShots(resolvedPrompt, usesComposition, setAngles).map((shot) => shot.prompt)
         : [resolvedPrompt]
       ).some((text) => text.length > 32000)
     ) {
@@ -843,14 +847,16 @@ export default function ImagePromptForm({
           compositions = resolveCompositionAssignments(
             compositionState.templates,
             compositionState.angleSelections,
+            setShootAngles,
           );
           if (compositions) {
             preflightCompositionAssignments({
               assignments: compositions,
               targets,
               basePrompt: resolvedPrompt,
+              angles: setShootAngles,
             });
-            for (const template of templatesForPreflight(compositions)) {
+            for (const template of templatesForPreflight(compositions, setShootAngles)) {
               await window.api.shootTemplates.preflight(template);
             }
           }
@@ -885,7 +891,7 @@ export default function ImagePromptForm({
       if (total > BATCH_CONFIRM_THRESHOLD || hasPairedTargets) {
         const confirmed = window.confirm(
           angleSet
-            ? `${batchScope}: This will make ${total} images for ${batchTargets.length} products: ${batchTargets.length * PRODUCT_ANGLES.length} paid generations${includeCloseUp ? ` plus ${batchTargets.length} local close-up crops` : ''}. Continue?`
+            ? `${batchScope}: This will make ${total} images for ${batchTargets.length} products: ${batchTargets.length * setAngles.length} paid generations plus ${batchTargets.length} local close-up crops. Continue?`
             : `${batchScope}: This will generate ${total} images (${perProduct} for each of ${batchTargets.length} products) and bill your provider for every one. Continue?`,
         );
         if (!confirmed) return;
@@ -902,7 +908,7 @@ export default function ImagePromptForm({
 
       onSubmit?.({
         prompt: resolvedPrompt,
-        count: PRODUCT_ANGLES.length,
+        count: setAngles.length,
         aspectRatio: effectiveAspect,
         compositions,
         singleShotAngle: compositionState.singleShotAngle,
@@ -911,8 +917,7 @@ export default function ImagePromptForm({
         referenceImages: uploadedImageUrls,
         provider,
         modelVariant,
-        angleShots: buildAngleShots(resolvedPrompt, !!compositions),
-        includeCloseUp,
+        angleShots: buildAngleShots(resolvedPrompt, !!compositions, setAngles),
         ...(isBatch ? { targets: batchTargets } : {}),
         ...(!isBatch && singleSourceName ? { sourceName: singleSourceName } : {}),
       });
@@ -1188,7 +1193,7 @@ export default function ImagePromptForm({
                 Clicking the active choice again turns the angle set off. */}
             {(
               [
-                ['two', 'Eye level and 45°'],
+                ['two', '45° and close-up'],
                 ['three', 'Eye level, 45° and close-up'],
               ] as const
             ).map(([choice, hint]) => (
@@ -1203,7 +1208,7 @@ export default function ImagePromptForm({
                       : 'border-[var(--base-color-brand--umber)]/50 bg-[var(--base-color-brand--shell)] text-[var(--base-color-brand--bean)] hover:text-[var(--base-color-brand--cinamon)]'
                   }`}
                 >
-                  {angleSetSize(choice === 'three')} angles
+                  {angleSetSize(choice)} angles
                 </button>
               </Hint>
             ))}
@@ -1287,7 +1292,11 @@ export default function ImagePromptForm({
                 />
               </Hint>
 
-              <CompositionTemplatePicker angleSet={angleSet} includeCloseUp={includeCloseUp} />
+              <CompositionTemplatePicker
+                angleSet={angleSet}
+                angles={setShootAngles}
+                imageCount={angleSetCount}
+              />
             </div>
             {/* Generate stays alongside the controls and matches their 40px height. */}
             <Hint text="Create the images">

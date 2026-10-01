@@ -8,7 +8,7 @@ import {
 } from '../../../src/renderer/src/lib/compositionAssignments';
 import { buildCompositionRequest } from '../../../src/renderer/src/lib/compositionPrompt';
 import { buildGenerationJobs } from '../../../src/renderer/src/lib/generationJobs';
-import { buildAngleShots } from '../../../src/renderer/src/lib/productAngles';
+import { angleSetAngles, buildAngleShots } from '../../../src/renderer/src/lib/productAngles';
 import { SHOOT_ANGLES, type ShootTemplate } from '../../../src/shared/shootTemplates';
 
 function template(digit: string, aspectRatio: ShootTemplate['aspectRatio']): ShootTemplate {
@@ -189,6 +189,49 @@ describe('per-angle composition assignments', () => {
     expect(() => buildGenerationJobs({ ...options, angleShots: undefined })).toThrow('angle set');
     expect(() => buildGenerationJobs({ ...options, angleShots: [] })).toThrow('angle set');
     expect(() => buildGenerationJobs({ ...options, compositions: {} })).toThrow('eye-level');
+  });
+
+  it('uses only the 45° composition for a 45° and close-up set', () => {
+    const { templates, selections, targets } = fixture();
+    selections['eye-level'] = null;
+    const assignments = resolveCompositionAssignments(templates, selections, ['elevated-45'])!;
+    expect(Object.keys(assignments)).toEqual(['elevated-45']);
+    expect(templatesForPreflight(assignments, ['elevated-45']).map((item) => item.id)).toEqual([
+      templates[1]!.id,
+    ]);
+    // Without the set's angles, both shots are still required.
+    expect(() => templatesForPreflight(assignments)).toThrow('eye-level');
+    const jobs = buildGenerationJobs({
+      basePrompt: 'Natural product scene',
+      targets,
+      count: 9,
+      angleShots: buildAngleShots('Natural product scene', true, angleSetAngles('two')),
+      compositions: assignments,
+      idPrefix: 'test',
+    });
+    expect(jobs).toHaveLength(20);
+    expect(jobs.every((job) => job.angleId === 'elevated-45')).toBe(true);
+    expect(jobs.every((job) => job.aspectRatio === '4:5')).toBe(true);
+    expect(jobs[0]!.prompt).toContain('45-degree elevated');
+  });
+
+  it('ignores an eye-level choice when the set has no eye-level shot', () => {
+    const { templates, selections } = fixture();
+    expect(
+      Object.keys(resolveCompositionAssignments(templates, selections, ['elevated-45'])!),
+    ).toEqual(['elevated-45']);
+    selections['elevated-45'] = null;
+    expect(resolveCompositionAssignments(templates, selections, ['elevated-45'])).toBeUndefined();
+  });
+
+  it('rejects compositions that do not match the angle set', () => {
+    const { options } = fixture();
+    expect(() =>
+      buildGenerationJobs({
+        ...options,
+        angleShots: buildAngleShots('Natural product scene', true, angleSetAngles('two')),
+      }),
+    ).toThrow('angle set');
   });
 
   it('leaves no-template angle and single-shot jobs unchanged', () => {

@@ -52,9 +52,22 @@ export const PRODUCT_ANGLES: ProductAngle[] = [
 export const CLOSE_UP_SOURCE_ANGLE_ID = 'elevated-45';
 export const CLOSE_UP_LABEL = 'Close-up (cropped)';
 
-/** Images an angle set produces: one per generated angle, plus the crop when included. */
-export function angleSetSize(includeCloseUp: boolean): number {
-  return PRODUCT_ANGLES.length + (includeCloseUp ? 1 : 0);
+/**
+ * Which angle set to shoot. 'three' is eye level, 45° and the close-up; 'two'
+ * drops the eye-level shot. Both keep the 45° shot the close-up is cropped from.
+ */
+export type AngleSetChoice = 'two' | 'three';
+
+/** The angles a set generates, in display order. The close-up is added by cropping. */
+export function angleSetAngles(choice: AngleSetChoice): ProductAngle[] {
+  return choice === 'two'
+    ? PRODUCT_ANGLES.filter((angle) => angle.id === CLOSE_UP_SOURCE_ANGLE_ID)
+    : PRODUCT_ANGLES;
+}
+
+/** Images an angle set produces: one per generated angle, plus the cropped close-up. */
+export function angleSetSize(choice: AngleSetChoice): number {
+  return angleSetAngles(choice).length + 1;
 }
 
 /**
@@ -91,9 +104,13 @@ export function buildAnglePrompt(
   return `${basePrompt.trim()}\n\n${angle.instruction}\n\n${CONSISTENCY_CLAUSE}`;
 }
 
-/** Build the full ordered set of shots for one product photo. */
-export function buildAngleShots(basePrompt: string, composition = false): AngleShot[] {
-  return PRODUCT_ANGLES.map((angle) => ({
+/** Build the ordered shots for one product photo; every angle unless a set is given. */
+export function buildAngleShots(
+  basePrompt: string,
+  composition = false,
+  angles: ProductAngle[] = PRODUCT_ANGLES,
+): AngleShot[] {
+  return angles.map((angle) => ({
     angleId: angle.id,
     prompt: buildAnglePrompt(basePrompt, angle, composition),
   }));
