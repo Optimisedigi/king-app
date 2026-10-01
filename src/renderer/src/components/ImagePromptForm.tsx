@@ -20,6 +20,7 @@ import {
   AutoIcon,
   aspectRatioIcons,
   ImageAddIcon,
+  ChevronDownIcon,
 } from '@/components/icons';
 import {
   aspectRatioOptions,
@@ -59,6 +60,17 @@ import {
 import type { ShootAngle, ShootTemplate } from '../../../shared/shootTemplates';
 
 type ImageProvider = 'openai-api' | 'openai-oauth' | 'fal';
+
+/** Remembers whether the prompter was collapsed, across tab switches and restarts. */
+const COLLAPSED_STORAGE_KEY = 'imagePromptForm.collapsed';
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
 
 /** Above this many images, a batch asks for confirmation before spending. */
 const BATCH_CONFIRM_THRESHOLD = 12;
@@ -112,6 +124,19 @@ export default function ImagePromptForm({
   editData,
 }: ImagePromptFormProps) {
   const [prompt, setPrompt] = useState(initialPrompt);
+  // Collapsing only hides the panel; it stays mounted so every setting is kept.
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(COLLAPSED_STORAGE_KEY, String(next));
+      } catch {
+        /* Not persisted; the toggle still works for this session. */
+      }
+      return next;
+    });
+  }, []);
   const [selectedEntity, setSelectedEntity] = useState('none');
   // Each product folder remembers its own composition, e.g. one per cake size.
   useEffect(() => {
@@ -373,7 +398,7 @@ export default function ImagePromptForm({
 
   useEffect(() => {
     autoResizeTextarea();
-  }, [prompt, autoResizeTextarea]);
+  }, [prompt, collapsed, autoResizeTextarea]);
 
   function addManualGroup(): void {
     const ids = selectedProductEntries.map((entry) => entry.slice('product:'.length));
@@ -515,6 +540,7 @@ export default function ImagePromptForm({
   useEffect(() => {
     if (recreateData) {
       setPrompt(recreateData.prompt);
+      setCollapsed(false);
       selectedReferenceUrls.current = new Set();
       setSelectedProductEntries([]);
       setSelectedGroupIds([]);
@@ -529,6 +555,7 @@ export default function ImagePromptForm({
     if (!editData?.imageUrl) return;
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setPrompt('');
+    setCollapsed(false);
     selectedReferenceUrls.current = new Set();
     setSelectedProductEntries([]);
     setSelectedGroupIds([]);
@@ -936,7 +963,11 @@ export default function ImagePromptForm({
         setIsDraggingFiles(false);
         addReferenceFiles(Array.from(e.dataTransfer.files));
       }}
-      className={`fixed inset-x-1/2 bottom-4 z-20 hidden w-[calc(100vw-2rem)] -translate-x-1/2 rounded-[2rem] border bg-[var(--base-color-brand--champagne)] p-[22px] shadow-[0_12px_40px_-12px_rgba(51,32,26,0.25)] transition-colors md:block lg:max-w-[1065px] ${
+      className={`fixed inset-x-1/2 bottom-4 z-20 hidden -translate-x-1/2 border bg-[var(--base-color-brand--champagne)] shadow-[0_12px_40px_-12px_rgba(51,32,26,0.25)] transition-colors md:block ${
+        collapsed
+          ? 'w-max max-w-[calc(100vw-2rem)] rounded-full p-1'
+          : 'w-[calc(100vw-2rem)] rounded-[2rem] p-[22px] lg:max-w-[1065px]'
+      } ${
         isDraggingFiles
           ? 'border-2 border-dashed border-[var(--base-color-brand--bean)]'
           : 'border-[var(--base-color-brand--umber)]/30'
@@ -950,7 +981,42 @@ export default function ImagePromptForm({
           Drop photos to add them as references
         </p>
       )}
-      <fieldset className="relative z-20 flex min-w-0 gap-3">
+      {collapsed ? (
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-expanded={false}
+          aria-label="Show prompter"
+          className="flex h-9 max-w-[min(480px,calc(100vw-3rem))] items-center gap-2 rounded-full px-4 text-[11px] font-semibold text-[var(--base-color-brand--bean)] transition-colors hover:text-[var(--base-color-brand--cinamon)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--base-color-brand--bean)]"
+        >
+          <span className="rotate-180">
+            <ChevronDownIcon />
+          </span>
+          <span className="min-w-0 truncate">
+            {prompt.trim() ? prompt.trim() : 'Show prompter'}
+          </span>
+          {referenceImages.length > 0 && (
+            <span className="shrink-0 text-[var(--base-color-brand--umber)]">
+              · {referenceImages.length} photo{referenceImages.length === 1 ? '' : 's'}
+            </span>
+          )}
+        </button>
+      ) : (
+        <span className="absolute -top-3 left-1/2 z-30 -translate-x-1/2">
+          <Hint text="Hide prompter">
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              aria-expanded
+              aria-label="Hide prompter"
+              className="grid h-6 w-10 items-center justify-center rounded-full border border-[var(--base-color-brand--umber)]/40 bg-[var(--base-color-brand--shell)] text-[var(--base-color-brand--bean)] transition hover:bg-[var(--base-color-brand--bean)] hover:text-[var(--base-color-brand--shell)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--base-color-brand--bean)]"
+            >
+              <ChevronDownIcon />
+            </button>
+          </Hint>
+        </span>
+      )}
+      <fieldset className={`relative z-20 min-w-0 gap-3 ${collapsed ? 'hidden' : 'flex'}`}>
         {/* Left section */}
         <div className="min-h-0 min-w-0 flex-1 space-y-3">
           {/* Reference images preview */}
